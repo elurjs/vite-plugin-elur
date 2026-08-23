@@ -5,7 +5,7 @@ Vite plugin for [Nix.js](https://nix-js.dev/) that adds Hot Module Replacement (
 ## Requirements
 
 - Vite `^8.0.0`
-- `@deijose/nix-js` `^2.5.3`
+- `@deijose/nix-js` `^3.2.1`
 
 ## Installation
 
