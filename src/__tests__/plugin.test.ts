@@ -18,7 +18,6 @@ function transform(code: string, id = "src/app.ts") {
 }
 
 beforeEach(() => {
-    // Reset the global HMR runtime between tests
     const runtime = getNixHmrRuntime();
     runtime.mounts.clear();
     runtime.signals.clear();
@@ -194,7 +193,6 @@ describe("HMR runtime", () => {
         __nixMount("src/app.ts#0", factory, container);
         expect(container.textContent).toBe("7");
 
-        // Simulate HMR update: factory is updated but signal stays the same
         const updatedFactory = () => {
             const s = __nixGetOrCreateSignal("src/app.ts:count", () => ({ value: 0 }));
             return html`<span>${() => s.value}</span>`;

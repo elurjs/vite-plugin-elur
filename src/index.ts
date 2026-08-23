@@ -183,7 +183,6 @@ function hmrTransform(code: string, fileId: string): string | null {
     CallExpression(nodePath: NodePath<t.CallExpression>) {
       const callee = nodePath.node.callee;
       if (!t.isIdentifier(callee) || !names.mount || callee.name !== names.mount) return;
-      // Avoid re-processing a call we already wrapped.
       if (t.isIdentifier(callee, { name: "__nixMount" })) return;
       const args = nodePath.node.arguments;
       const componentArg = t.isExpression(args[0]) ? args[0] : t.identifier("undefined");
@@ -219,7 +218,6 @@ function hmrTransform(code: string, fileId: string): string | null {
 
   ast.program.body.unshift(makeRuntimeImport(runtimeImports));
 
-  // Add HMR accept handler if this is a mount point
   if (hasMount) {
     const importMeta = t.metaProperty(t.identifier("import"), t.identifier("meta"));
     const importMetaHot = t.memberExpression(importMeta, t.identifier("hot"));
