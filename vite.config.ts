@@ -13,7 +13,11 @@ export default defineConfig({
         `${entryName}.${format === "es" ? "js" : "cjs"}`,
     },
     rollupOptions: {
-      external: ["@deijose/nix-js", "@babel/core", "@babel/parser", "@babel/traverse", "@babel/generator", "@babel/types", "vite"],
+      external: [
+        /^@deijose\/nix-js(\/.*)?$/,
+        "@babel/core", "@babel/parser", "@babel/traverse", "@babel/generator", "@babel/types",
+        "vite",
+      ],
     },
     sourcemap: true,
     minify: false,

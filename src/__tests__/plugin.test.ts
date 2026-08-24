@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { html } from "@deijose/nix-js";
-import nixPlugin from "../index.js";
+import nixJsPlugin from "../index.js";
 import {
     __nixGetOrCreateSignal,
     __nixGetOrCreateForm,
@@ -12,7 +12,7 @@ import {
 } from "../runtime.js";
 
 function transform(code: string, id = "src/app.ts") {
-    const plugin = nixPlugin();
+    const plugin = nixJsPlugin();
     const result = (plugin.transform as Function)(code, id);
     return typeof result === "string" ? result : result?.code ?? null;
 }
@@ -150,6 +150,48 @@ mount(App, "#app");
 `;
         const out = transform(code, "src/app.ts")!;
         expect(out).toContain('__nixGetOrCreateSignal("src/app.ts:count"');
+    });
+});
+
+describe("compiler transform", () => {
+    it("generates an imperative single-root renderer", () => {
+        const code = `
+import { html } from "@deijose/nix-js";
+export const row = (item, selected) => html\`
+  <tr class=\${() => item.id === selected.value ? "danger" : ""}>
+    <td>\${item.id}</td>
+    <td><a @click=\${() => item.select()}>\${() => item.label.value}</a></td>
+  </tr>
+\`;
+`;
+        const out = transform(code)!;
+        expect(out).toContain("__nixCreateTemplate");
+        expect(out).toContain("__nixCreateTemplatePrototype");
+        // Events without modifiers are inlined as __nix_click = handler
+        expect(out).toContain(".__nix_click");
+        expect(out).toContain("Object.create");
+        expect(out).not.toContain("__nixCompiledTemplate(");
+    });
+
+    it("lowers a reactive repeat call to a compiled keyed block", () => {
+        const code = `
+import { html, repeat } from "@deijose/nix-js";
+export const view = (rows) => html\`<tbody>\${() => repeat(rows.value, row => row.id, row => html\`<tr><td>\${row.id}</td></tr>\`)}</tbody>\`;
+`;
+        const out = transform(code)!;
+        expect(out).toContain("__nixCompiledRepeatDirect");
+        expect(out).toContain("$mount(parent, before");
+        expect(out).toContain("() => rows.value");
+    });
+
+    it("uses the generic compiled fallback for SVG", () => {
+        const code = `
+import { html } from "@deijose/nix-js";
+export const icon = (label) => html\`<svg><text>\${() => label.value}</text></svg>\`;
+`;
+        const out = transform(code)!;
+        expect(out).toContain("__nixCompiledTemplate");
+        expect(out).not.toContain("__nixCreateTemplatePrototype");
     });
 });
 

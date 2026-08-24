@@ -4,13 +4,19 @@ import * as t from "@babel/types";
 import _traverse, { type NodePath } from "@babel/traverse";
 import type { Plugin } from "vite";
 import { transformInterpolation } from "./interpolation.js";
+import {
+  compileTemplate,
+  genFactoryCode,
+  genCallCode,
+  type ExpressionKind,
+} from "@deijose/nix-js-compiler";
 
 // @babel/traverse and @babel/generator are CommonJS modules whose default
 // export can be nested under `.default` when consumed from an ESM bundle.
 const traverse = ((_traverse as unknown as { default?: typeof _traverse }).default ?? _traverse) as typeof _traverse;
 const generate = ((_generate as unknown as { default?: typeof _generate }).default ?? _generate) as typeof _generate;
 
-export interface NixPluginOptions {
+export interface NixJsPluginOptions {
   /**
    * Preserve global state (stores, routers, signals) across HMR updates.
    * @default true
@@ -22,10 +28,18 @@ export interface NixPluginOptions {
    */
   preserveDOM?: boolean;
   /**
-   * Inject Nix devtools client.
+   * Inject Nix.js devtools client.
    * @default false
    */
   devtools?: boolean;
+  /**
+   * Enable the build-time compiler for html`` templates.
+   * When true, templates are compiled into direct DOM manipulation code
+   * (firstChild/nextSibling navigation, inline events, specialized effects).
+   * When false, templates use the runtime generic path.
+   * @default true
+   */
+  compiler?: boolean;
 }
 
 const NIX_IMPORTS = [
@@ -217,7 +231,27 @@ function hmrTransform(code: string, fileId: string): string | null {
 
   if (!runtimeImports.length) return null;
 
-  ast.program.body.unshift(makeRuntimeImport(runtimeImports));
+  // Check if there's already a runtime import (e.g. from compilerTransform)
+  const existingRuntimeImport = ast.program.body.find(
+    (n): n is t.ImportDeclaration =>
+      t.isImportDeclaration(n) && n.source.value === "@deijose/vite-plugin-nix-js/runtime"
+  );
+
+  if (existingRuntimeImport) {
+    // Merge new specifiers into the existing import
+    for (const name of runtimeImports) {
+      const exists = existingRuntimeImport.specifiers.some(
+        (s) => t.isImportSpecifier(s) && t.isIdentifier(s.imported) && s.imported.name === name
+      );
+      if (!exists) {
+        existingRuntimeImport.specifiers.push(
+          t.importSpecifier(t.identifier(name), t.identifier(name))
+        );
+      }
+    }
+  } else {
+    ast.program.body.unshift(makeRuntimeImport(runtimeImports));
+  }
 
   if (hasMount) {
     const importMeta = t.metaProperty(t.identifier("import"), t.identifier("meta"));
@@ -261,11 +295,243 @@ function hmrTransform(code: string, fileId: string): string | null {
   return result.code;
 }
 
-export default function nixPlugin(options: NixPluginOptions = {}): Plugin {
+// =============================================================================
+// --- Compiler transform: html`` → __nixCompiledTemplate calls ---
+// =============================================================================
+
+/**
+ * Detects `html` tagged template expressions and compiles them into
+ * pre-computed __nixCompiledTemplate factory calls.
+ *
+ * For each unique template strings array, emits a module-level factory constant
+ * and replaces the html`` expression with a factory call.
+ */
+function lowerCompiledExpression(
+  node: t.Expression,
+  repeatLocalName: string | null,
+  specializedFactories: ReadonlySet<string>,
+): { code: string; runtimeImport?: string } {
+  if (
+    repeatLocalName &&
+    t.isArrowFunctionExpression(node) &&
+    t.isCallExpression(node.body) &&
+    t.isIdentifier(node.body.callee, { name: repeatLocalName }) &&
+    node.body.arguments.length === 3 &&
+    node.body.arguments.every((argument) => t.isExpression(argument))
+  ) {
+    const [items, key, render] = node.body.arguments as t.Expression[];
+    if (
+      t.isArrowFunctionExpression(render) &&
+      t.isCallExpression(render.body) &&
+      t.isIdentifier(render.body.callee) &&
+      specializedFactories.has(render.body.callee.name) &&
+      render.body.arguments.every((argument) => t.isExpression(argument)) &&
+      render.params.every((parameter) => t.isIdentifier(parameter))
+    ) {
+      const factoryName = render.body.callee.name;
+      const params = render.params.map((parameter) => generate(parameter).code);
+      const args = (render.body.arguments as t.Expression[]).map((argument) => generate(argument).code);
+      return {
+        code: `__nixCompiledRepeatDirect(()=>(${generate(items).code}),${generate(key).code},(parent,before,${params.join(",")})=>${factoryName}$mount(parent,before,${args.join(",")}))`,
+        runtimeImport: "__nixCompiledRepeatDirect",
+      };
+    }
+    return {
+      code: `__nixCompiledRepeat(()=>(${generate(items).code}),${generate(key).code},${generate(render).code})`,
+      runtimeImport: "__nixCompiledRepeat",
+    };
+  }
+  return { code: generate(node).code };
+}
+
+function classifyExpression(node: t.Expression): ExpressionKind {
+  if (
+    t.isArrowFunctionExpression(node) &&
+    t.isMemberExpression(node.body) &&
+    !node.body.computed &&
+    t.isIdentifier(node.body.property, { name: "value" })
+  ) return "reactive-text";
+  if (t.isArrowFunctionExpression(node) || t.isFunctionExpression(node)) return "reactive";
+  if (
+    t.isStringLiteral(node) ||
+    t.isNumericLiteral(node) ||
+    t.isBooleanLiteral(node) ||
+    t.isNullLiteral(node) ||
+    t.isBigIntLiteral(node)
+  ) return "static";
+  return "generic";
+}
+
+function compilerTransform(code: string, fileId: string): string | null {
+  let ast: t.File;
+  try {
+    ast = parse(code, {
+      sourceType: "module",
+      plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
+    });
+  } catch {
+    return null;
+  }
+
+  // Find the local name for the `html` import
+  let htmlLocalName: string | null = null;
+  let repeatLocalName: string | null = null;
+
+  traverse(ast, {
+    ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
+      const source = nodePath.node.source.value;
+      if (!isNixImport(source)) return;
+      for (const specifier of nodePath.node.specifiers) {
+        if (!t.isImportSpecifier(specifier) || !t.isIdentifier(specifier.imported)) continue;
+        if (specifier.imported.name === "html") htmlLocalName = specifier.local.name;
+        if (specifier.imported.name === "repeat") repeatLocalName = specifier.local.name;
+      }
+    },
+  });
+
+  if (!htmlLocalName) return null;
+
+  // Collect all html`` tagged template expressions at module scope or inside functions
+  const factories: Array<{
+    id: string;
+    strings: string[];
+    exprNodes: t.Expression[];
+    expressionKinds: ExpressionKind[];
+    path: NodePath<t.TaggedTemplateExpression>;
+  }> = [];
+  let factoryCounter = 0;
+
+  traverse(ast, {
+    TaggedTemplateExpression(nodePath: NodePath<t.TaggedTemplateExpression>) {
+      const tag = nodePath.node.tag;
+      if (!t.isIdentifier(tag) || tag.name !== htmlLocalName) return;
+
+      const quasi = nodePath.node.quasi;
+      const strings: string[] = [];
+      for (let i = 0; i < quasi.quasis.length; i++) {
+        strings.push(quasi.quasis[i].value.cooked ?? quasi.quasis[i].value.raw);
+      }
+
+      // Skip templates with no interpolations (pure static HTML — no bindings)
+      if (quasi.expressions.length === 0) return;
+
+      // Skip templates where any expression is not a simple expression
+      // (e.g. we can't compile dynamic template compositions)
+      const exprNodes: t.Expression[] = [];
+      for (const expr of quasi.expressions) {
+        if (!t.isExpression(expr)) return;
+        exprNodes.push(expr);
+      }
+
+      const id = `_nixFactory$${factoryCounter++}`;
+      factories.push({
+        id,
+        strings,
+        exprNodes,
+        expressionKinds: exprNodes.map(classifyExpression),
+        path: nodePath,
+      });
+    },
+  });
+
+  if (factories.length === 0) return null;
+
+  // Sort factories by AST position in DESCENDING order (innermost first).
+  // This ensures that nested html`` expressions (e.g. inside repeat() calls
+  // that are themselves expressions of an outer html``) are compiled before
+  // their parent template. Otherwise, serializing the parent's expressions
+  // would stringify the inner html`` before it gets compiled.
+  factories.sort((a, b) => {
+    const aStart = a.path.node.start ?? 0;
+    const bStart = b.path.node.start ?? 0;
+    return bStart - aStart;
+  });
+
+  // Generate factory declarations and replace html`` expressions
+  const factoryDecls: t.Statement[] = [];
+  const runtimeImports: string[] = [];
+  const specializedFactories = new Set<string>();
+
+  for (const { id, strings, exprNodes, expressionKinds, path } of factories) {
+    // Compile the template
+    const compiled = compileTemplate(strings, expressionKinds);
+    if (compiled.specialized) specializedFactories.add(id);
+
+    // Generate factory code string and parse it into an AST node
+    const generatedFactory = genFactoryCode(id, compiled);
+    const factoryAst = parse(generatedFactory.code, {
+      sourceType: "module",
+      plugins: ["typescript"],
+    });
+    // genFactoryCode may produce multiple declarations (resolver + factory)
+    for (const decl of factoryAst.program.body) {
+      factoryDecls.push(decl as t.Statement);
+    }
+
+    // Generate the call expression to replace html``
+    const loweredExpressions = exprNodes.map((node) =>
+      lowerCompiledExpression(node, repeatLocalName, specializedFactories)
+    );
+    const exprSourceStrings = loweredExpressions.map((expression) => expression.code);
+    for (const expression of loweredExpressions) {
+      if (expression.runtimeImport && !runtimeImports.includes(expression.runtimeImport)) {
+        runtimeImports.push(expression.runtimeImport);
+      }
+    }
+    const callCode = genCallCode(id, exprSourceStrings);
+    const callAst = parse(callCode, {
+      sourceType: "module",
+      plugins: ["typescript"],
+    });
+    const callExpr = (callAst.program.body[0] as t.ExpressionStatement).expression;
+    path.replaceWith(callExpr);
+
+    for (const runtimeImport of generatedFactory.runtimeImports) {
+      if (!runtimeImports.includes(runtimeImport)) runtimeImports.push(runtimeImport);
+    }
+  }
+
+  // Insert factory declarations at the top of the module (after imports)
+  const firstNonImport = ast.program.body.findIndex(
+    (n) => !t.isImportDeclaration(n)
+  );
+  const insertIndex = firstNonImport === -1 ? ast.program.body.length : firstNonImport;
+  ast.program.body.splice(insertIndex, 0, ...factoryDecls);
+
+  // Add runtime import for __nixCompiledTemplate
+  if (runtimeImports.length > 0) {
+    // Check if there's already a runtime import
+    const existingRuntimeImport = ast.program.body.find(
+      (n): n is t.ImportDeclaration =>
+        t.isImportDeclaration(n) && n.source.value === "@deijose/vite-plugin-nix-js/runtime"
+    );
+
+    if (existingRuntimeImport) {
+      for (const name of runtimeImports) {
+        const exists = existingRuntimeImport.specifiers.some(
+          (s) => t.isImportSpecifier(s) && t.isIdentifier(s.imported) && s.imported.name === name
+        );
+        if (!exists) {
+          existingRuntimeImport.specifiers.push(
+            t.importSpecifier(t.identifier(name), t.identifier(name))
+          );
+        }
+      }
+    } else {
+      ast.program.body.unshift(makeRuntimeImport(runtimeImports));
+    }
+  }
+
+  const result = generate(ast, { sourceMaps: true, sourceFileName: fileId });
+  return result.code;
+}
+
+export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
   const opts = {
     preserveState: true,
     preserveDOM: true,
     devtools: false,
+    compiler: true,
     ...options,
   };
 
@@ -278,7 +544,10 @@ export default function nixPlugin(options: NixPluginOptions = {}): Plugin {
         return null;
       }
       if (id.includes("node_modules")) return null;
+      // Skip the plugin's own runtime files (both source and dist)
       if (id.includes("vite-plugin-nix-js/runtime")) return null;
+      if (id.includes("vite-plugin-nix/dist/runtime")) return null;
+      if (id.includes("vite-plugin-nix/src/runtime")) return null;
 
       const cwd = process.cwd();
       const fileId = id.startsWith(cwd) ? id.slice(cwd.length + 1) : id;
@@ -291,7 +560,17 @@ export default function nixPlugin(options: NixPluginOptions = {}): Plugin {
         currentCode = interpResult;
       }
 
-      // Phase 2: HMR transform — preserve signals/stores/forms/routers/mounts.
+      // Phase 2: Compiler transform — compile html`` templates into
+      // pre-computed factory calls (eliminates detectContext, buildHTML,
+      // and both TreeWalkers at runtime). Can be disabled via plugin option.
+      if (opts.compiler) {
+        const compilerResult = compilerTransform(currentCode, fileId);
+        if (compilerResult) {
+          currentCode = compilerResult;
+        }
+      }
+
+      // Phase 3: HMR transform — preserve signals/stores/forms/routers/mounts.
       const hmrResult = hmrTransform(currentCode, fileId);
       if (hmrResult) {
         currentCode = hmrResult;
