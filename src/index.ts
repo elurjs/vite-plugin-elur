@@ -3,6 +3,7 @@ import _generate from "@babel/generator";
 import * as t from "@babel/types";
 import _traverse, { type NodePath } from "@babel/traverse";
 import type { Plugin } from "vite";
+import { transformInterpolation } from "./interpolation.js";
 
 // @babel/traverse and @babel/generator are CommonJS modules whose default
 // export can be nested under `.default` when consumed from an ESM bundle.
@@ -281,10 +282,24 @@ export default function nixPlugin(options: NixPluginOptions = {}): Plugin {
 
       const cwd = process.cwd();
       const fileId = id.startsWith(cwd) ? id.slice(cwd.length + 1) : id;
-      const transformed = hmrTransform(code, fileId);
-      if (!transformed) return null;
 
-      return { code: transformed, map: null };
+      // Phase 1: Interpolation transform — rewrite partial attribute
+      // interpolations in html`` templates into full bindings.
+      let currentCode = code;
+      const interpResult = transformInterpolation(currentCode, fileId);
+      if (interpResult) {
+        currentCode = interpResult;
+      }
+
+      // Phase 2: HMR transform — preserve signals/stores/forms/routers/mounts.
+      const hmrResult = hmrTransform(currentCode, fileId);
+      if (hmrResult) {
+        currentCode = hmrResult;
+      }
+
+      if (currentCode === code) return null;
+
+      return { code: currentCode, map: null };
     },
   };
 }

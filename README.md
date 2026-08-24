@@ -1,11 +1,11 @@
 # @deijose/vite-plugin-nix-js
 
-Vite plugin for [Nix.js](https://nix-js.dev/) that adds Hot Module Replacement (HMR) with state, scroll, and focus preservation.
+Vite plugin for [Nix.js](https://nix-js.dev/) that adds **compile-time partial attribute interpolation** and **Hot Module Replacement (HMR)** with state, scroll, and focus preservation.
 
 ## Requirements
 
 - Vite `^8.0.0`
-- `@deijose/nix-js` `^3.2.1`
+- `@deijose/nix-js` `^3.4.0`
 
 ## Installation
 
@@ -33,10 +33,38 @@ No extra configuration is required.
 
 ## What it does
 
+- **Partial attribute interpolation** — rewrites `class="btn ${size}"` into
+  `class=${__nixCompose("btn ", size, "")}` at compile time, so the core
+  `html()` function only sees full bindings.
 - **Hot-reloads** components without a full page refresh.
 - **Preserves state** of module-scoped stores, routers, forms, and signals.
 - **Preserves scroll position** and the currently focused element.
 - **Works automatically** — no manual `import.meta.hot` wrapping needed.
+
+## Partial attribute interpolation
+
+The plugin includes a state-machine lexer that runs at compile time. It finds
+`html` tagged template expressions and rewrites partial attribute
+interpolations into full bindings:
+
+```typescript
+// Input (author code)
+html`<div class="btn btn-${() => size.value}">…</div>`
+
+// Output (after plugin transform)
+html`<div class=${__nixCompose("btn btn-", () => size.value, "")}>…</div>`
+```
+
+The lexer handles:
+- HTML comments, doctype, processing instructions
+- Raw-text tags (`<script>`, `<style>`, `<textarea>`)
+- Quoted and unquoted attribute values
+- Multi-segment interpolations (`class="a ${x} b ${y} c"`)
+- Multiple attributes in the same tag
+- Validation: rejects partials on `@event`, `ref`/`show`/`hide`, and boolean
+  attributes (`checked`, `disabled`, …) with descriptive errors
+
+Templates without partials are left byte-identical (fast path).
 
 ## How it works
 
