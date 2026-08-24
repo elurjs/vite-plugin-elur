@@ -65,6 +65,21 @@ declare global {
 }
 
 export function getNixHmrRuntime(): NixHmrRuntime {
+  // SSR guard: if window doesn't exist (server-side render), return a no-op
+  // runtime. The HMR transform is skipped in SSR via the plugin's transform
+  // hook, but this guard prevents crashes if the runtime module is imported
+  // during SSR for any reason.
+  if (typeof window === "undefined") {
+    return {
+      mounts: new Map(),
+      signals: new Map(),
+      forms: new Map(),
+      stores: new Map(),
+      routers: new Map(),
+      pendingScroll: null,
+      pendingFocus: null,
+    };
+  }
   if (!window.__nixHmrRuntime) {
     window.__nixHmrRuntime = {
       mounts: new Map(),

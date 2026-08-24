@@ -539,7 +539,7 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
     name: "vite-plugin-nix-js",
     enforce: "pre",
 
-    transform(code, id) {
+    transform(code, id, transformOptions) {
       if (!id.endsWith(".ts") && !id.endsWith(".tsx") && !id.endsWith(".js") && !id.endsWith(".jsx")) {
         return null;
       }
@@ -549,11 +549,20 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
       if (id.includes("vite-plugin-nix/dist/runtime")) return null;
       if (id.includes("vite-plugin-nix/src/runtime")) return null;
 
+      // Detect SSR: Vite 5-7 passes options.ssr, Vite 8 uses this.environment.
+      // In SSR mode, skip compiler and HMR transforms — they produce browser-only
+      // code (document.createElement, window). The original html`` with buildHTML()
+      // is server-safe and produces HTML strings for SSR.
+      // Interpolation transform is syntactic only and safe for both paths.
+      const isSSR = transformOptions?.ssr === true ||
+        (this as any)?.environment?.config?.consumer === "server";
+
       const cwd = process.cwd();
       const fileId = id.startsWith(cwd) ? id.slice(cwd.length + 1) : id;
 
       // Phase 1: Interpolation transform — rewrite partial attribute
       // interpolations in html`` templates into full bindings.
+      // Safe for SSR: it only rewrites syntax, no runtime impact.
       let currentCode = code;
       const interpResult = transformInterpolation(currentCode, fileId);
       if (interpResult) {
@@ -562,8 +571,8 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
 
       // Phase 2: Compiler transform — compile html`` templates into
       // pre-computed factory calls (eliminates detectContext, buildHTML,
-      // and both TreeWalkers at runtime). Can be disabled via plugin option.
-      if (opts.compiler) {
+      // and both TreeWalkers at runtime). Browser-only: skip in SSR.
+      if (opts.compiler && !isSSR) {
         const compilerResult = compilerTransform(currentCode, fileId);
         if (compilerResult) {
           currentCode = compilerResult;
@@ -571,9 +580,12 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
       }
 
       // Phase 3: HMR transform — preserve signals/stores/forms/routers/mounts.
-      const hmrResult = hmrTransform(currentCode, fileId);
-      if (hmrResult) {
-        currentCode = hmrResult;
+      // Browser-only: the HMR runtime accesses window, skip in SSR.
+      if (!isSSR) {
+        const hmrResult = hmrTransform(currentCode, fileId);
+        if (hmrResult) {
+          currentCode = hmrResult;
+        }
       }
 
       if (currentCode === code) return null;
