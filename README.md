@@ -22,10 +22,10 @@ yarn add -D @deijose/vite-plugin-nix-js
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import nix from "@deijose/vite-plugin-nix-js";
+import nixJs from "@deijose/vite-plugin-nix-js";
 
 export default defineConfig({
-  plugins: [nix()],
+  plugins: [nixJs()],
 });
 ```
 
