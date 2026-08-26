@@ -5,7 +5,7 @@ Vite plugin for [Nix.js](https://nix-js.dev/) that adds **compile-time partial a
 ## Requirements
 
 - Vite `^8.0.0`
-- `@deijose/nix-js` `^3.4.0`
+- `@deijose/nix-js` `^3.5.0`
 
 ## Installation
 
