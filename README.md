@@ -1,20 +1,20 @@
-# @deijose/vite-plugin-nix-js
+# @elurjs/vite-plugin-elur
 
-Vite plugin for [Nix.js](https://nix-js.dev/) that adds **compile-time partial attribute interpolation** and **Hot Module Replacement (HMR)** with state, scroll, and focus preservation.
+Vite plugin for [Elur](https://elur.dev/) that adds **compile-time partial attribute interpolation** and **Hot Module Replacement (HMR)** with state, scroll, and focus preservation.
 
 ## Requirements
 
 - Vite `^8.0.0`
-- `@deijose/nix-js` `^3.5.0`
+- `@elurjs/core` `^3.5.0`
 
 ## Installation
 
 ```bash
-npm install -D @deijose/vite-plugin-nix-js
+npm install -D @elurjs/vite-plugin-elur
 # or
-pnpm add -D @deijose/vite-plugin-nix-js
+pnpm add -D @elurjs/vite-plugin-elur
 # or
-yarn add -D @deijose/vite-plugin-nix-js
+yarn add -D @elurjs/vite-plugin-elur
 ```
 
 ## Usage
@@ -22,10 +22,10 @@ yarn add -D @deijose/vite-plugin-nix-js
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import nixJs from "@deijose/vite-plugin-nix-js";
+import elurJs from "@elurjs/vite-plugin-elur";
 
 export default defineConfig({
-  plugins: [nixJs()],
+  plugins: [elurJs()],
 });
 ```
 
@@ -34,7 +34,7 @@ No extra configuration is required.
 ## What it does
 
 - **Partial attribute interpolation** — rewrites `class="btn ${size}"` into
-  `class=${__nixCompose("btn ", size, "")}` at compile time, so the core
+  `class=${__elurCompose("btn ", size, "")}` at compile time, so the core
   `html()` function only sees full bindings.
 - **Hot-reloads** components without a full page refresh.
 - **Preserves state** of module-scoped stores, routers, forms, and signals.
@@ -52,7 +52,7 @@ interpolations into full bindings:
 html`<div class="btn btn-${() => size.value}">…</div>`
 
 // Output (after plugin transform)
-html`<div class=${__nixCompose("btn btn-", () => size.value, "")}>…</div>`
+html`<div class=${__elurCompose("btn btn-", () => size.value, "")}>…</div>`
 ```
 
 The lexer handles:
@@ -72,17 +72,17 @@ The plugin transforms source files at build time to wrap stable calls with a sma
 
 | Call | Wrapped to |
 |------|------------|
-| `signal(...)` | `__nixGetOrCreateSignal(id, factory)` |
-| `createForm(...)` | `__nixGetOrCreateForm(id, factory)` |
-| `createStore(...)` | `__nixGetOrCreateStore(id, factory)` |
-| `createRouter(...)` | `__nixGetOrCreateRouter(id, factory)` |
-| `mount(...)` | `__nixMount(id, factory, ...)` |
+| `signal(...)` | `__elurGetOrCreateSignal(id, factory)` |
+| `createForm(...)` | `__elurGetOrCreateForm(id, factory)` |
+| `createStore(...)` | `__elurGetOrCreateStore(id, factory)` |
+| `createRouter(...)` | `__elurGetOrCreateRouter(id, factory)` |
+| `mount(...)` | `__elurMount(id, factory, ...)` |
 
 For example, this developer-written code:
 
 ```ts
-import { signal } from "@deijose/nix-js";
-import { createForm } from "@deijose/nix-js/form";
+import { signal } from "@elurjs/core";
+import { createForm } from "@elurjs/core/form";
 
 const count = signal(0);
 const form = createForm({ name: "" });
@@ -94,22 +94,22 @@ mount(App(), "#app", { router });
 is transformed into:
 
 ```ts
-import { __nixGetOrCreateSignal, __nixGetOrCreateForm, __nixGetOrCreateStore, __nixGetOrCreateRouter, __nixMount, __nixHmrAccept } from "@deijose/vite-plugin-nix-js/runtime";
+import { __elurGetOrCreateSignal, __elurGetOrCreateForm, __elurGetOrCreateStore, __elurGetOrCreateRouter, __elurMount, __elurHmrAccept } from "@elurjs/vite-plugin-elur/runtime";
 
-const count = __nixGetOrCreateSignal("src/main.ts:count", () => signal(0));
-const form = __nixGetOrCreateForm("src/main.ts:form", () => createForm({ name: "" }));
-const cart = __nixGetOrCreateStore("src/main.ts:cart", () => createStore({ items: [] }, { name: "cart" }));
-const router = __nixGetOrCreateRouter("src/main.ts:router", () => createRouter(routes));
-__nixMount("src/main.ts", () => App(), "#app", { router });
+const count = __elurGetOrCreateSignal("src/main.ts:count", () => signal(0));
+const form = __elurGetOrCreateForm("src/main.ts:form", () => createForm({ name: "" }));
+const cart = __elurGetOrCreateStore("src/main.ts:cart", () => createStore({ items: [] }, { name: "cart" }));
+const router = __elurGetOrCreateRouter("src/main.ts:router", () => createRouter(routes));
+__elurMount("src/main.ts", () => App(), "#app", { router });
 
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
-    __nixHmrAccept(newModule, "src/main.ts");
+    __elurHmrAccept(newModule, "src/main.ts");
   });
 }
 ```
 
-The runtime keeps a global singleton on `window.__nixHmrRuntime` that re-uses existing stores, routers, and application mounts, while unmounting and re-mounting the changed component and restoring scroll/focus.
+The runtime keeps a global singleton on `window.__elurHmrRuntime` that re-uses existing stores, routers, and application mounts, while unmounting and re-mounting the changed component and restoring scroll/focus.
 
 ## Supported cases
 
@@ -127,7 +127,7 @@ Signals, forms, stores, and routers declared **inside functions** are intentiona
 Keep state at module scope so it is preserved across updates:
 
 ```ts
-import { signal, html } from "@deijose/nix-js";
+import { signal, html } from "@elurjs/core";
 
 // ✅ Preserved
 const count = signal(0);
@@ -151,14 +151,14 @@ For class components, store shared state in a module-scoped `createStore` or `si
 
 ## Known limitations
 
-- `NixComponent` class instance state (private properties set in `onInit`/`onMount`) is not preserved across HMR updates.
+- `ElurComponent` class instance state (private properties set in `onInit`/`onMount`) is not preserved across HMR updates.
 - HMR is module-granular: when a file changes, every mount point declared in that file is re-mounted.
 - Only module-scoped `signal`, `createForm`, `createStore`, `createRouter`, and `mount` calls are tracked; declarations nested inside functions are left untouched.
 
 ## Development
 
 ```bash
-cd vite-plugin-nix
+cd vite-plugin-elur
 npm install
 npm run typecheck
 npm run build

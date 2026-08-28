@@ -9,14 +9,14 @@ import {
   genFactoryCode,
   genCallCode,
   type ExpressionKind,
-} from "@deijose/nix-js-compiler";
+} from "@elurjs/core-compiler";
 
 // @babel/traverse and @babel/generator are CommonJS modules whose default
 // export can be nested under `.default` when consumed from an ESM bundle.
 const traverse = ((_traverse as unknown as { default?: typeof _traverse }).default ?? _traverse) as typeof _traverse;
 const generate = ((_generate as unknown as { default?: typeof _generate }).default ?? _generate) as typeof _generate;
 
-export interface NixJsPluginOptions {
+export interface ElurJsPluginOptions {
   /**
    * Preserve global state (stores, routers, signals) across HMR updates.
    * @default true
@@ -28,7 +28,7 @@ export interface NixJsPluginOptions {
    */
   preserveDOM?: boolean;
   /**
-   * Inject Nix.js devtools client.
+   * Inject Elur devtools client.
    * @default false
    */
   devtools?: boolean;
@@ -42,16 +42,16 @@ export interface NixJsPluginOptions {
   compiler?: boolean;
 }
 
-const NIX_IMPORTS = [
-  "@deijose/nix-js",
-  "@deijose/nix-js/signals",
-  "@deijose/nix-js/store",
-  "@deijose/nix-js/router",
-  "@deijose/nix-js/form",
+const ELUR_IMPORTS = [
+  "@elurjs/core",
+  "@elurjs/core/signals",
+  "@elurjs/core/store",
+  "@elurjs/core/router",
+  "@elurjs/core/form",
 ];
 
-function isNixImport(source: string): boolean {
-  return NIX_IMPORTS.some((imp) => source === imp || source.startsWith(`${imp}/`));
+function isElurImport(source: string): boolean {
+  return ELUR_IMPORTS.some((imp) => source === imp || source.startsWith(`${imp}/`));
 }
 
 interface ImportedNames {
@@ -78,7 +78,7 @@ function getImportedNames(code: string): ImportedNames {
   traverse(ast, {
     ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
       const source = nodePath.node.source.value;
-      if (!isNixImport(source)) return;
+      if (!isElurImport(source)) return;
 
       for (const specifier of nodePath.node.specifiers) {
         if (t.isImportSpecifier(specifier) && t.isIdentifier(specifier.imported)) {
@@ -101,7 +101,7 @@ function makeRuntimeImport(needed: string[]): t.ImportDeclaration {
   const specifiers = needed.map((name) =>
     t.importSpecifier(t.identifier(name), t.identifier(name))
   );
-  return t.importDeclaration(specifiers, t.stringLiteral("@deijose/vite-plugin-nix-js/runtime"));
+  return t.importDeclaration(specifiers, t.stringLiteral("@elurjs/vite-plugin-elur/runtime"));
 }
 
 // Strip TypeScript-only wrappers so we can inspect the underlying expression.
@@ -117,8 +117,8 @@ function unwrapExpression(node: t.Node): t.Node {
 
 function hmrTransform(code: string, fileId: string): string | null {
   const names = getImportedNames(code);
-  const hasNix = names.signal || names.createForm || names.createStore || names.createRouter || names.mount;
-  if (!hasNix) return null;
+  const hasElur = names.signal || names.createForm || names.createStore || names.createRouter || names.mount;
+  if (!hasElur) return null;
 
   let ast: t.File;
   try {
@@ -127,7 +127,7 @@ function hmrTransform(code: string, fileId: string): string | null {
       plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
     });
   } catch (err) {
-    console.warn(`[nix-plugin] Could not parse ${fileId}:`, err);
+    console.warn(`[elur-plugin] Could not parse ${fileId}:`, err);
     return null;
   }
 
@@ -155,50 +155,50 @@ function hmrTransform(code: string, fileId: string): string | null {
       if (names.signal && callee === names.signal) {
         const signalId = `${fileId}:${localName}`;
         const arrow = t.arrowFunctionExpression([], t.blockStatement([t.returnStatement(initNode)]));
-        nodePath.node.init = t.callExpression(t.identifier("__nixGetOrCreateSignal"), [
+        nodePath.node.init = t.callExpression(t.identifier("__elurGetOrCreateSignal"), [
           t.stringLiteral(signalId),
           arrow,
         ]);
-        if (!runtimeImports.includes("__nixGetOrCreateSignal")) runtimeImports.push("__nixGetOrCreateSignal");
+        if (!runtimeImports.includes("__elurGetOrCreateSignal")) runtimeImports.push("__elurGetOrCreateSignal");
         return;
       }
 
       if (names.createForm && callee === names.createForm) {
         const formId = `${fileId}:${localName}`;
         const arrow = t.arrowFunctionExpression([], t.blockStatement([t.returnStatement(initNode)]));
-        nodePath.node.init = t.callExpression(t.identifier("__nixGetOrCreateForm"), [
+        nodePath.node.init = t.callExpression(t.identifier("__elurGetOrCreateForm"), [
           t.stringLiteral(formId),
           arrow,
         ]);
-        if (!runtimeImports.includes("__nixGetOrCreateForm")) runtimeImports.push("__nixGetOrCreateForm");
+        if (!runtimeImports.includes("__elurGetOrCreateForm")) runtimeImports.push("__elurGetOrCreateForm");
         return;
       }
 
       if (names.createStore && callee === names.createStore) {
         const storeId = `${fileId}:${localName}`;
         const arrow = t.arrowFunctionExpression([], t.blockStatement([t.returnStatement(initNode)]));
-        nodePath.node.init = t.callExpression(t.identifier("__nixGetOrCreateStore"), [
+        nodePath.node.init = t.callExpression(t.identifier("__elurGetOrCreateStore"), [
           t.stringLiteral(storeId),
           arrow,
         ]);
-        if (!runtimeImports.includes("__nixGetOrCreateStore")) runtimeImports.push("__nixGetOrCreateStore");
+        if (!runtimeImports.includes("__elurGetOrCreateStore")) runtimeImports.push("__elurGetOrCreateStore");
         return;
       }
 
       if (names.createRouter && callee === names.createRouter) {
         const routerId = `${fileId}:${localName}`;
         const arrow = t.arrowFunctionExpression([], t.blockStatement([t.returnStatement(initNode)]));
-        nodePath.node.init = t.callExpression(t.identifier("__nixGetOrCreateRouter"), [
+        nodePath.node.init = t.callExpression(t.identifier("__elurGetOrCreateRouter"), [
           t.stringLiteral(routerId),
           arrow,
         ]);
-        if (!runtimeImports.includes("__nixGetOrCreateRouter")) runtimeImports.push("__nixGetOrCreateRouter");
+        if (!runtimeImports.includes("__elurGetOrCreateRouter")) runtimeImports.push("__elurGetOrCreateRouter");
       }
     },
     CallExpression(nodePath: NodePath<t.CallExpression>) {
       const callee = nodePath.node.callee;
       if (!t.isIdentifier(callee) || !names.mount || callee.name !== names.mount) return;
-      if (t.isIdentifier(callee, { name: "__nixMount" })) return;
+      if (t.isIdentifier(callee, { name: "__elurMount" })) return;
       const args = nodePath.node.arguments;
       const componentArg = t.isExpression(args[0]) ? args[0] : t.identifier("undefined");
       const containerArg = t.isExpression(args[1]) ? args[1] : t.identifier("undefined");
@@ -217,7 +217,7 @@ function hmrTransform(code: string, fileId: string): string | null {
       );
 
       nodePath.replaceWith(
-        t.callExpression(t.identifier("__nixMount"), [
+        t.callExpression(t.identifier("__elurMount"), [
           t.stringLiteral(mountId),
           factory,
           containerArg,
@@ -225,7 +225,7 @@ function hmrTransform(code: string, fileId: string): string | null {
         ])
       );
       nodePath.skip();
-      if (!runtimeImports.includes("__nixMount")) runtimeImports.push("__nixMount");
+      if (!runtimeImports.includes("__elurMount")) runtimeImports.push("__elurMount");
     },
   });
 
@@ -234,7 +234,7 @@ function hmrTransform(code: string, fileId: string): string | null {
   // Check if there's already a runtime import (e.g. from compilerTransform)
   const existingRuntimeImport = ast.program.body.find(
     (n): n is t.ImportDeclaration =>
-      t.isImportDeclaration(n) && n.source.value === "@deijose/vite-plugin-nix-js/runtime"
+      t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
   );
 
   if (existingRuntimeImport) {
@@ -267,7 +267,7 @@ function hmrTransform(code: string, fileId: string): string | null {
                 [t.identifier("newModule")],
                 t.blockStatement([
                   t.expressionStatement(
-                    t.callExpression(t.identifier("__nixHmrAccept"), [
+                    t.callExpression(t.identifier("__elurHmrAccept"), [
                       t.identifier("newModule"),
                       t.stringLiteral(fileId),
                     ])
@@ -279,13 +279,13 @@ function hmrTransform(code: string, fileId: string): string | null {
         ),
       ])
     );
-    if (!runtimeImports.includes("__nixHmrAccept")) {
+    if (!runtimeImports.includes("__elurHmrAccept")) {
       const imp = ast.program.body.find(
         (n): n is t.ImportDeclaration =>
-          t.isImportDeclaration(n) && n.source.value === "@deijose/vite-plugin-nix-js/runtime"
+          t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
       );
       if (imp) {
-        imp.specifiers.push(t.importSpecifier(t.identifier("__nixHmrAccept"), t.identifier("__nixHmrAccept")));
+        imp.specifiers.push(t.importSpecifier(t.identifier("__elurHmrAccept"), t.identifier("__elurHmrAccept")));
       }
     }
     ast.program.body.push(acceptBlock);
@@ -296,12 +296,12 @@ function hmrTransform(code: string, fileId: string): string | null {
 }
 
 // =============================================================================
-// --- Compiler transform: html`` → __nixCompiledTemplate calls ---
+// --- Compiler transform: html`` → __elurCompiledTemplate calls ---
 // =============================================================================
 
 /**
  * Detects `html` tagged template expressions and compiles them into
- * pre-computed __nixCompiledTemplate factory calls.
+ * pre-computed __elurCompiledTemplate factory calls.
  *
  * For each unique template strings array, emits a module-level factory constant
  * and replaces the html`` expression with a factory call.
@@ -332,13 +332,13 @@ function lowerCompiledExpression(
       const params = render.params.map((parameter) => generate(parameter).code);
       const args = (render.body.arguments as t.Expression[]).map((argument) => generate(argument).code);
       return {
-        code: `__nixCompiledRepeatDirect(()=>(${generate(items).code}),${generate(key).code},(parent,before,${params.join(",")})=>${factoryName}$mount(parent,before,${args.join(",")}))`,
-        runtimeImport: "__nixCompiledRepeatDirect",
+        code: `__elurCompiledRepeatDirect(()=>(${generate(items).code}),${generate(key).code},(parent,before,${params.join(",")})=>${factoryName}$mount(parent,before,${args.join(",")}))`,
+        runtimeImport: "__elurCompiledRepeatDirect",
       };
     }
     return {
-      code: `__nixCompiledRepeat(()=>(${generate(items).code}),${generate(key).code},${generate(render).code})`,
-      runtimeImport: "__nixCompiledRepeat",
+      code: `__elurCompiledRepeat(()=>(${generate(items).code}),${generate(key).code},${generate(render).code})`,
+      runtimeImport: "__elurCompiledRepeat",
     };
   }
   return { code: generate(node).code };
@@ -380,7 +380,7 @@ function compilerTransform(code: string, fileId: string): string | null {
   traverse(ast, {
     ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
       const source = nodePath.node.source.value;
-      if (!isNixImport(source)) return;
+      if (!isElurImport(source)) return;
       for (const specifier of nodePath.node.specifiers) {
         if (!t.isImportSpecifier(specifier) || !t.isIdentifier(specifier.imported)) continue;
         if (specifier.imported.name === "html") htmlLocalName = specifier.local.name;
@@ -423,7 +423,7 @@ function compilerTransform(code: string, fileId: string): string | null {
         exprNodes.push(expr);
       }
 
-      const id = `_nixFactory$${factoryCounter++}`;
+      const id = `_elurFactory$${factoryCounter++}`;
       factories.push({
         id,
         strings,
@@ -498,12 +498,12 @@ function compilerTransform(code: string, fileId: string): string | null {
   const insertIndex = firstNonImport === -1 ? ast.program.body.length : firstNonImport;
   ast.program.body.splice(insertIndex, 0, ...factoryDecls);
 
-  // Add runtime import for __nixCompiledTemplate
+  // Add runtime import for __elurCompiledTemplate
   if (runtimeImports.length > 0) {
     // Check if there's already a runtime import
     const existingRuntimeImport = ast.program.body.find(
       (n): n is t.ImportDeclaration =>
-        t.isImportDeclaration(n) && n.source.value === "@deijose/vite-plugin-nix-js/runtime"
+        t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
     );
 
     if (existingRuntimeImport) {
@@ -526,7 +526,7 @@ function compilerTransform(code: string, fileId: string): string | null {
   return result.code;
 }
 
-export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
+export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin {
   const opts = {
     preserveState: true,
     preserveDOM: true,
@@ -536,7 +536,7 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
   };
 
   return {
-    name: "vite-plugin-nix-js",
+    name: "vite-plugin-elur",
     enforce: "pre",
 
     transform(code, id, transformOptions) {
@@ -545,9 +545,9 @@ export default function nixJsPlugin(options: NixJsPluginOptions = {}): Plugin {
       }
       if (id.includes("node_modules")) return null;
       // Skip the plugin's own runtime files (both source and dist)
-      if (id.includes("vite-plugin-nix-js/runtime")) return null;
-      if (id.includes("vite-plugin-nix/dist/runtime")) return null;
-      if (id.includes("vite-plugin-nix/src/runtime")) return null;
+      if (id.includes("vite-plugin-elur/runtime")) return null;
+      if (id.includes("vite-plugin-elur/dist/runtime")) return null;
+      if (id.includes("vite-plugin-elur/src/runtime")) return null;
 
       // Detect SSR: Vite 5-7 passes options.ssr, Vite 8 uses this.environment.
       // In SSR mode, skip compiler and HMR transforms — they produce browser-only

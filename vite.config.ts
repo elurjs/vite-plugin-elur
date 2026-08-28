@@ -14,7 +14,7 @@ export default defineConfig({
     },
     rollupOptions: {
       external: [
-        /^@deijose\/nix-js(\/.*)?$/,
+        /^@elurjs\/core(\/.*)?$/,
         "@babel/core", "@babel/parser", "@babel/traverse", "@babel/generator", "@babel/types",
         "vite",
       ],

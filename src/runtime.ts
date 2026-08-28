@@ -1,4 +1,4 @@
-import { effect, mount, type NixComponent, type NixMountHandle, type NixTemplate, type TemplateBindingContext, type TemplateDescriptor } from "@deijose/nix-js";
+import { effect, mount, type ElurComponent, type ElurMountHandle, type ElurTemplate, type TemplateBindingContext, type TemplateDescriptor } from "@elurjs/core";
 import {
   _activateBindingsWithNodes,
   _activateNodeBinding,
@@ -7,64 +7,64 @@ import {
   _createKeyedMount,
   _getKeyedSequence,
   _reconcileKeyedList,
-  NIX_RENDER_PROTOCOL,
-  NIX_TEMPLATE_DESCRIPTOR,
+  ELUR_RENDER_PROTOCOL,
+  ELUR_TEMPLATE_DESCRIPTOR,
   sanitizeUrl,
   type KEntry,
   type KeyedList,
-} from "@deijose/nix-js/template";
-import { _captureContextSnapshot, _withContextSnapshot } from "@deijose/nix-js/context";
+} from "@elurjs/core/template";
+import { _captureContextSnapshot, _withContextSnapshot } from "@elurjs/core/context";
 
-export type NixComponentFactory = () =>
-  | NixTemplate
-  | NixComponent
-  | Promise<NixTemplate | NixComponent>;
+export type ElurComponentFactory = () =>
+  | ElurTemplate
+  | ElurComponent
+  | Promise<ElurTemplate | ElurComponent>;
 
-export interface NixMountRecord {
+export interface ElurMountRecord {
   id: string;
-  factory: NixComponentFactory;
+  factory: ElurComponentFactory;
   container: Element | string;
   options?: Record<string, unknown>;
-  handle?: NixMountHandle;
+  handle?: ElurMountHandle;
 }
 
-export interface NixSignalRecord {
+export interface ElurSignalRecord {
   id: string;
   signal: unknown;
 }
 
-export interface NixFormRecord {
+export interface ElurFormRecord {
   id: string;
   form: unknown;
 }
 
-export interface NixStoreRecord {
+export interface ElurStoreRecord {
   id: string;
   store: unknown;
 }
 
-export interface NixRouterRecord {
+export interface ElurRouterRecord {
   id: string;
   router: unknown;
 }
 
-export interface NixHmrRuntime {
-  mounts: Map<string, NixMountRecord>;
-  signals: Map<string, NixSignalRecord>;
-  forms: Map<string, NixFormRecord>;
-  stores: Map<string, NixStoreRecord>;
-  routers: Map<string, NixRouterRecord>;
+export interface ElurHmrRuntime {
+  mounts: Map<string, ElurMountRecord>;
+  signals: Map<string, ElurSignalRecord>;
+  forms: Map<string, ElurFormRecord>;
+  stores: Map<string, ElurStoreRecord>;
+  routers: Map<string, ElurRouterRecord>;
   pendingScroll: { x: number; y: number } | null;
   pendingFocus: string | null;
 }
 
 declare global {
   interface Window {
-    __nixHmrRuntime?: NixHmrRuntime;
+    __elurHmrRuntime?: ElurHmrRuntime;
   }
 }
 
-export function getNixHmrRuntime(): NixHmrRuntime {
+export function getElurHmrRuntime(): ElurHmrRuntime {
   // SSR guard: if window doesn't exist (server-side render), return a no-op
   // runtime. The HMR transform is skipped in SSR via the plugin's transform
   // hook, but this guard prevents crashes if the runtime module is imported
@@ -80,8 +80,8 @@ export function getNixHmrRuntime(): NixHmrRuntime {
       pendingFocus: null,
     };
   }
-  if (!window.__nixHmrRuntime) {
-    window.__nixHmrRuntime = {
+  if (!window.__elurHmrRuntime) {
+    window.__elurHmrRuntime = {
       mounts: new Map(),
       signals: new Map(),
       forms: new Map(),
@@ -91,12 +91,12 @@ export function getNixHmrRuntime(): NixHmrRuntime {
       pendingFocus: null,
     };
   }
-  return window.__nixHmrRuntime;
+  return window.__elurHmrRuntime;
 }
 
-const runtime = getNixHmrRuntime();
+const runtime = getElurHmrRuntime();
 
-function mountInto(record: NixMountRecord): void {
+function mountInto(record: ElurMountRecord): void {
   const result = record.factory();
   if (result instanceof Promise) {
     result.then((component) => {
@@ -107,9 +107,9 @@ function mountInto(record: NixMountRecord): void {
   }
 }
 
-export function __nixMount(
+export function __elurMount(
   id: string,
-  factory: NixComponentFactory,
+  factory: ElurComponentFactory,
   container: Element | string,
   options?: Record<string, unknown>
 ): void {
@@ -124,7 +124,7 @@ export function __nixMount(
     return;
   }
 
-  const record: NixMountRecord = {
+  const record: ElurMountRecord = {
     id,
     factory,
     container,
@@ -134,7 +134,7 @@ export function __nixMount(
   mountInto(record);
 }
 
-export function __nixGetOrCreateSignal<T>(id: string, factory: () => T): T {
+export function __elurGetOrCreateSignal<T>(id: string, factory: () => T): T {
   const existing = runtime.signals.get(id);
   if (existing) return existing.signal as T;
   const signal = factory();
@@ -142,7 +142,7 @@ export function __nixGetOrCreateSignal<T>(id: string, factory: () => T): T {
   return signal;
 }
 
-export function __nixGetOrCreateForm<T>(id: string, factory: () => T): T {
+export function __elurGetOrCreateForm<T>(id: string, factory: () => T): T {
   const existing = runtime.forms.get(id);
   if (existing) return existing.form as T;
   const form = factory();
@@ -150,7 +150,7 @@ export function __nixGetOrCreateForm<T>(id: string, factory: () => T): T {
   return form;
 }
 
-export function __nixGetOrCreateStore<T>(id: string, factory: () => T): T {
+export function __elurGetOrCreateStore<T>(id: string, factory: () => T): T {
   const existing = runtime.stores.get(id);
   if (existing) return existing.store as T;
   const store = factory();
@@ -158,7 +158,7 @@ export function __nixGetOrCreateStore<T>(id: string, factory: () => T): T {
   return store;
 }
 
-export function __nixGetOrCreateRouter<T>(id: string, factory: () => T): T {
+export function __elurGetOrCreateRouter<T>(id: string, factory: () => T): T {
   const existing = runtime.routers.get(id);
   if (existing) return existing.router as T;
   const router = factory();
@@ -166,7 +166,7 @@ export function __nixGetOrCreateRouter<T>(id: string, factory: () => T): T {
   return router;
 }
 
-export function __nixSaveSnapshot(): {
+export function __elurSaveSnapshot(): {
   scroll: { x: number; y: number };
   focus: string | null;
   router: unknown;
@@ -184,7 +184,7 @@ export function __nixSaveSnapshot(): {
   };
 }
 
-export function __nixRestoreSnapshot(snapshot: ReturnType<typeof __nixSaveSnapshot>): void {
+export function __elurRestoreSnapshot(snapshot: ReturnType<typeof __elurSaveSnapshot>): void {
   runtime.pendingScroll = snapshot.scroll;
   runtime.pendingFocus = snapshot.focus;
 
@@ -214,7 +214,7 @@ export function __nixRestoreSnapshot(snapshot: ReturnType<typeof __nixSaveSnapsh
  * Generated by the Vite plugin's interpolation transform for partial attribute
  * interpolations like `class="btn ${size} size-${n}"`.
  */
-export function __nixCompose(...parts: unknown[]): unknown {
+export function __elurCompose(...parts: unknown[]): unknown {
   let hasFn = false;
   for (let i = 0; i < parts.length; i++) {
     if (typeof parts[i] === "function") {
@@ -241,29 +241,29 @@ export function __nixCompose(...parts: unknown[]): unknown {
   };
 }
 
-export function __nixHmrAccept(_newModule: unknown, moduleId: string): void {
+export function __elurHmrAccept(_newModule: unknown, moduleId: string): void {
   // A module may declare several mount points. Each is registered with an id
   // shaped like `${moduleId}#${index}`, so re-mount every record that belongs
   // to this module.
   const prefix = `${moduleId}#`;
-  const records: NixMountRecord[] = [];
+  const records: ElurMountRecord[] = [];
   for (const [id, record] of runtime.mounts) {
     if (id === moduleId || id.startsWith(prefix)) records.push(record);
   }
   if (!records.length) return;
 
-  const snapshot = __nixSaveSnapshot();
+  const snapshot = __elurSaveSnapshot();
   for (const record of records) {
     record.handle?.unmount();
     mountInto(record);
   }
-  __nixRestoreSnapshot(snapshot);
+  __elurRestoreSnapshot(snapshot);
 }
 
 // =============================================================================
-// --- __nixCompiledTemplate: compiled template factory ---
+// --- __elurCompiledTemplate: compiled template factory ---
 // =============================================================================
-// Creates a NixTemplate from pre-computed static data (html, contexts, pathMap,
+// Creates a ElurTemplate from pre-computed static data (html, contexts, pathMap,
 // accessPaths). Eliminates detectContext, buildHTML, and both TreeWalkers.
 
 interface CompiledPathMapEntry {
@@ -271,13 +271,13 @@ interface CompiledPathMapEntry {
   name: string | null;
 }
 
-export function __nixCompiledTemplate(
+export function __elurCompiledTemplate(
   strings: readonly string[],
   html: string,
   contexts: readonly unknown[],
   pathMap: readonly (CompiledPathMapEntry | null)[],
   resolveNodes: ((frag: DocumentFragment) => Array<Node | null>) | null,
-): (values: unknown[]) => NixTemplate {
+): (values: unknown[]) => ElurTemplate {
   let tpl: HTMLTemplateElement | null = null;
 
   // Pre-compute maxNodeIndex from pathMap (fallback for when resolveNodes is null)
@@ -291,14 +291,14 @@ export function __nixCompiledTemplate(
   function getTemplate(): HTMLTemplateElement {
     if (tpl) return tpl;
     if (typeof document === "undefined") {
-      throw new Error("[nix-js] DOM rendering requires a document. Use @deijose/nix-js/server on the server.");
+      throw new Error("[elur] DOM rendering requires a document. Use @elurjs/core/server on the server.");
     }
     tpl = document.createElement("template");
     tpl.innerHTML = html;
     return tpl;
   }
 
-  return function (values: unknown[]): NixTemplate {
+  return function (values: unknown[]): ElurTemplate {
     function _render(parent: Node, before: Node | null): () => void {
       const frag = getTemplate().content.cloneNode(true) as DocumentFragment;
 
@@ -366,68 +366,68 @@ export function __nixCompiledTemplate(
 
     const descriptor: TemplateDescriptor = { version: 1, strings, values, contexts: contexts as TemplateBindingContext[] };
 
-    const nixTemplate: NixTemplate = {
-      __isNixTemplate: true,
-      [NIX_TEMPLATE_DESCRIPTOR]: descriptor,
+    const elurTemplate: ElurTemplate = {
+      __isElurTemplate: true,
+      [ELUR_TEMPLATE_DESCRIPTOR]: descriptor,
       _render,
-      mount(container: Element | string): NixMountHandle {
+      mount(container: Element | string): ElurMountHandle {
         const el =
           typeof container === "string"
             ? (document.querySelector(container) as Element)
             : container;
         if (!el) {
-          throw new Error(`[nix-js] mount: contenedor no encontrado: ${container}`);
+          throw new Error(`[elur] mount: contenedor no encontrado: ${container}`);
         }
         const cleanup = _render(el, null);
         return { unmount() { cleanup(); } };
       },
     };
 
-    return nixTemplate;
+    return elurTemplate;
   };
 }
 
-type CompiledInstance = NixTemplate & Record<string, unknown>;
+type CompiledInstance = ElurTemplate & Record<string, unknown>;
 type CompiledRender = (this: CompiledInstance, parent: Node, before: Node | null) => () => void;
 
-export function __nixCreateTemplate(html: string): () => Node {
+export function __elurCreateTemplate(html: string): () => Node {
   let source: Node | null = null;
   return () => {
     if (!source) {
       if (typeof document === "undefined") {
-        throw new Error("[nix-js] DOM rendering requires a document. Use @deijose/nix-js/server on the server.");
+        throw new Error("[elur] DOM rendering requires a document. Use @elurjs/core/server on the server.");
       }
       const template = document.createElement("template");
       template.innerHTML = html;
       source = template.content.firstChild;
       if (!source || source.nextSibling) {
-        throw new Error("[nix-js] Compiled template expected one root node.");
+        throw new Error("[elur] Compiled template expected one root node.");
       }
     }
     return source.cloneNode(true);
   };
 }
 
-export function __nixCreateTemplatePrototype(
+export function __elurCreateTemplatePrototype(
   render: CompiledRender,
   strings: readonly string[],
   contexts: readonly TemplateBindingContext[],
   valueKeys: readonly string[],
 ): CompiledInstance {
   const prototype = {
-    __isNixTemplate: true as const,
+    __isElurTemplate: true as const,
     _render: render,
-    mount(this: CompiledInstance, container: Element | string): NixMountHandle {
+    mount(this: CompiledInstance, container: Element | string): ElurMountHandle {
       const element = typeof container === "string"
         ? document.querySelector(container) as Element | null
         : container;
-      if (!element) throw new Error(`[nix-js] mount: contenedor no encontrado: ${container}`);
+      if (!element) throw new Error(`[elur] mount: contenedor no encontrado: ${container}`);
       const cleanup = this._render(element, null);
       return { unmount: cleanup };
     },
   } as CompiledInstance;
 
-  Object.defineProperty(prototype, NIX_TEMPLATE_DESCRIPTOR, {
+  Object.defineProperty(prototype, ELUR_TEMPLATE_DESCRIPTOR, {
     get(this: CompiledInstance): TemplateDescriptor {
       const values = new Array<unknown>(valueKeys.length);
       for (let i = 0; i < valueKeys.length; i++) values[i] = this[valueKeys[i]];
@@ -438,28 +438,28 @@ export function __nixCreateTemplatePrototype(
   return prototype;
 }
 
-export function __nixDelegateEvents(events: readonly string[]): void {
+export function __elurDelegateEvents(events: readonly string[]): void {
   if (typeof document === "undefined") return;
   for (let i = 0; i < events.length; i++) _ensureDelegatedEvent(events[i]);
 }
 
-export function __nixEvent(
+export function __elurEvent(
   element: Node,
   eventName: string,
   modifiers: readonly string[],
   handler: unknown,
 ): void {
   if (typeof handler !== "function") return;
-  (element as any)[`__nix_${eventName}`] = handler;
-  if (modifiers.length > 0) (element as any)[`__nix_${eventName}_mods`] = modifiers;
+  (element as any)[`__elur_${eventName}`] = handler;
+  if (modifiers.length > 0) (element as any)[`__elur_${eventName}_mods`] = modifiers;
 }
 
-export function __nixClearEvent(element: Node, eventName: string): void {
-  (element as any)[`__nix_${eventName}`] = null;
-  (element as any)[`__nix_${eventName}_mods`] = null;
+export function __elurClearEvent(element: Node, eventName: string): void {
+  (element as any)[`__elur_${eventName}`] = null;
+  (element as any)[`__elur_${eventName}_mods`] = null;
 }
 
-export function __nixAttr(
+export function __elurAttr(
   element: Node,
   attrName: string,
   value: unknown,
@@ -469,7 +469,7 @@ export function __nixAttr(
   const target = element as Element;
   if (executable) {
     console.warn(
-      `[nix-js] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
+      `[elur] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
     );
   }
 
@@ -512,7 +512,7 @@ export function __nixAttr(
   });
 }
 
-export function __nixNode(
+export function __elurNode(
   target: Node,
   value: unknown,
   targetIsAnchor: boolean,
@@ -545,15 +545,15 @@ export function __nixNode(
   return { dispose, hooks: postMountHooks ? [] : hooks };
 }
 
-export function __nixEffect(fn: () => void): () => void {
+export function __elurEffect(fn: () => void): () => void {
   return effect(fn);
 }
 
-export function __nixQueue(fn: () => void): void {
+export function __elurQueue(fn: () => void): void {
   _queueDOMWrite(fn);
 }
 
-export function __nixSetAttr(
+export function __elurSetAttr(
   element: Node,
   attrName: string,
   value: unknown,
@@ -563,7 +563,7 @@ export function __nixSetAttr(
   const target = element as Element;
   if (executable) {
     console.warn(
-      `[nix-js] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
+      `[elur] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
     );
   }
   const isDomProp = (
@@ -580,7 +580,7 @@ export function __nixSetAttr(
   }
 }
 
-export function __nixNodeFallback(
+export function __elurNodeFallback(
   text: Text,
   getter: () => unknown,
   postMountHooks: Array<() => void>,
@@ -599,7 +599,7 @@ export function __nixNodeFallback(
   };
 }
 
-export function __nixAttrWriter(
+export function __elurAttrWriter(
   element: Node,
   attrName: string,
   isUrl: boolean,
@@ -608,7 +608,7 @@ export function __nixAttrWriter(
   const target = element as Element;
   if (executable) {
     console.warn(
-      `[nix-js] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
+      `[elur] Dynamic binding on executable attribute "${attrName}". Use @event for handlers; avoid binding untrusted values here.`,
     );
   }
   const isDomProp = (
@@ -645,7 +645,7 @@ export function __nixAttrWriter(
   };
 }
 
-export function __nixNodeWriter(
+export function __elurNodeWriter(
   target: Node,
   getter: () => unknown,
   targetIsAnchor: boolean,
@@ -696,7 +696,7 @@ export function __nixNodeWriter(
   return writer;
 }
 
-export function __nixReactiveText(
+export function __elurReactiveText(
   target: Node,
   getter: () => unknown,
   targetMode: "node" | "parent" | "text",
@@ -757,13 +757,13 @@ interface DirectKeyedEntry {
   cleanup: () => void;
 }
 
-export function __nixCompiledRepeatDirect<T>(
+export function __elurCompiledRepeatDirect<T>(
   readItems: () => T[],
   keyFn: (item: T, index: number) => string | number,
   mountRow: (parent: Node, before: Node | null, item: T, index: number) => () => void,
-): { [NIX_RENDER_PROTOCOL]: { mountDom(context: { parent: Node; before: Node | null }): () => void } } {
+): { [ELUR_RENDER_PROTOCOL]: { mountDom(context: { parent: Node; before: Node | null }): () => void } } {
   return {
-    [NIX_RENDER_PROTOCOL]: {
+    [ELUR_RENDER_PROTOCOL]: {
       mountDom({ parent, before }) {
         const anchor = before ?? document.createTextNode("");
         if (!before) parent.appendChild(anchor);
@@ -798,7 +798,7 @@ export function __nixCompiledRepeatDirect<T>(
                 const key = keyFn(items[i], i);
                 prevOrder[i] = key;
                 if (state.has(key)) {
-                  console.warn(`[nix-js] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
+                  console.warn(`[elur] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
                 }
                 state.set(key, createEntry(fragment, null, items[i], i));
               }
@@ -834,7 +834,7 @@ export function __nixCompiledRepeatDirect<T>(
                 const key = newOrder[i];
                 const mounted = createEntry(fragment, null, items[i], i);
                 if (keyedState.has(key)) {
-                  console.warn(`[nix-js] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
+                  console.warn(`[elur] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
                 }
                 keyedState.set(key, mounted);
               }
@@ -905,13 +905,13 @@ export function __nixCompiledRepeatDirect<T>(
   };
 }
 
-export function __nixCompiledRepeat<T>(
+export function __elurCompiledRepeat<T>(
   readItems: () => T[],
   keyFn: (item: T, index: number) => string | number,
-  renderFn: (item: T, index: number) => NixTemplate | NixComponent,
-): { [NIX_RENDER_PROTOCOL]: { mountDom(context: { parent: Node; before: Node | null }): () => void } } {
+  renderFn: (item: T, index: number) => ElurTemplate | ElurComponent,
+): { [ELUR_RENDER_PROTOCOL]: { mountDom(context: { parent: Node; before: Node | null }): () => void } } {
   return {
-    [NIX_RENDER_PROTOCOL]: {
+    [ELUR_RENDER_PROTOCOL]: {
       mountDom({ parent, before }) {
         const anchor = before ?? document.createTextNode("");
         if (!before) parent.appendChild(anchor);
@@ -939,7 +939,7 @@ export function __nixCompiledRepeat<T>(
             mount: mountItem,
             ctxSnapshot: contextSnapshot,
             onDuplicateKey: (key) => {
-              console.warn(`[nix-js] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
+              console.warn(`[elur] repeat(): duplicate key "${key}". Keys must be unique; the previous entry leaks (orphaned nodes + live effects).`);
             },
           });
         });

@@ -1,22 +1,22 @@
 {
-  "name": "@deijose/vite-plugin-nix-js",
+  "name": "@elurjs/vite-plugin-elur",
   "version": "2.0.2",
-  "description": "Vite plugin for Nix.js with Hot Module Replacement and full state preservation (signals, stores, routers, forms)",
+  "description": "Vite plugin for Elur with Hot Module Replacement and full state preservation (signals, stores, routers, forms)",
   "license": "MIT",
   "author": "Deiver Vasquez",
-  "homepage": "https://github.com/DeijoseDevelop/vite-plugin-nix-js#readme",
+  "homepage": "https://github.com/elurjs/vite-plugin-elur#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DeijoseDevelop/vite-plugin-nix-js.git"
+    "url": "git+https://github.com/elurjs/vite-plugin-elur.git"
   },
   "bugs": {
-    "url": "https://github.com/DeijoseDevelop/vite-plugin-nix-js/issues"
+    "url": "https://github.com/elurjs/vite-plugin-elur/issues"
   },
   "type": "module",
   "keywords": [
     "vite",
     "plugin",
-    "nix-js",
+    "elur",
     "hmr",
     "hot-module-replacement"
   ],
@@ -54,10 +54,10 @@
     "@babel/parser": "^7.26.0",
     "@babel/traverse": "^7.26.0",
     "@babel/types": "^7.26.0",
-    "@deijose/nix-js-compiler": "^1.0.0"
+    "@elurjs/core-compiler": "^1.0.0"
   },
   "peerDependencies": {
-    "@deijose/nix-js": "^3.5.0",
+    "@elurjs/core": "^3.5.0",
     "vite": "^7.0.0 || ^8.0.0"
   },
   "devDependencies": {

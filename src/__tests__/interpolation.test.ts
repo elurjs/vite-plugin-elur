@@ -19,7 +19,7 @@ describe("transformInterpolation", () => {
         const code = "const t = html`<div class=\"btn ${size}\">hello</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
         expect(out!).toContain('"btn "');
         expect(out!).toContain("size");
         expect(out!).toContain('""');
@@ -29,7 +29,7 @@ describe("transformInterpolation", () => {
         const code = "const t = html`<div class=\"btn ${a} size-${b}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
         expect(out!).toContain('"btn "');
         expect(out!).toContain('" size-"');
         expect(out!).toContain('""');
@@ -45,7 +45,7 @@ describe("transformInterpolation", () => {
         const code = "const t = html`<div class=btn-${size}>x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
         expect(out!).toContain('"btn-"');
     });
 
@@ -53,7 +53,7 @@ describe("transformInterpolation", () => {
         const code = "const t = html`<a href=\"/x/${id}\" class=\"link ${cls}\">x</a>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
         expect(out!).toContain('"/x/"');
         expect(out!).toContain('"link "');
     });
@@ -89,15 +89,15 @@ const b = html\`<span class="label $\{cls}">y</span>\`;
         const out = transform(code);
         expect(out).not.toBeNull();
         // Count calls (exclude the import statement)
-        const composeCount = (out!.match(/__nixCompose\(/g) || []).length;
+        const composeCount = (out!.match(/__elurCompose\(/g) || []).length;
         expect(composeCount).toBe(2);
     });
 
-    it("injects __nixCompose import", () => {
+    it("injects __elurCompose import", () => {
         const code = "const t = html`<div class=\"btn ${size}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain('import { __nixCompose } from "@deijose/vite-plugin-nix-js/runtime"');
+        expect(out!).toContain('import { __elurCompose } from "@elurjs/vite-plugin-elur/runtime"');
     });
 
     it("does not inject import when no partials", () => {
@@ -109,20 +109,20 @@ const b = html\`<span class="label $\{cls}">y</span>\`;
         const code = "const t = html`<!-- comment --><div class=\"btn ${size}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
     });
 
     it("handles raw-text tags (script/style)", () => {
         const code = "const t = html`<style>.x{}</style><div class=\"btn ${size}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
     });
 
     it("handles nested quotes in attribute value", () => {
         const code = "const t = html`<div data-x=\"a'b ${val}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain("__nixCompose");
+        expect(out!).toContain("__elurCompose");
     });
 });

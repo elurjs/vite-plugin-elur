@@ -2,18 +2,18 @@
 // --- Partial attribute interpolation — compile-time transform ---
 // =============================================================================
 //
-// Moved from nix-js-microframework/src/nix/template/attribute-interpolation.ts.
+// Moved from elur-microframework/src/elur/template/attribute-interpolation.ts.
 //
 // This module runs in the Vite plugin at compile time. It finds `html```
 // tagged template expressions, runs the state-machine lexer over the cooked
 // strings, and rewrites partial attribute interpolations into full bindings
-// using a runtime helper (`__nixCompose`).
+// using a runtime helper (`__elurCompose`).
 //
 //   html`<a class="btn ${size} size-${n}">`
 //
 // becomes:
 //
-//   html`<a class=${__nixCompose("btn ", size, " size-", n, "")}>`
+//   html`<a class=${__elurCompose("btn ", size, " size-", n, "")}>`
 //
 // The core `html()` function never sees partials — it receives a canonical
 // template with only full bindings, exactly as it did before the lexer existed.
@@ -43,19 +43,19 @@ const DIRECTIVE_ATTRS = new Set(["ref", "show", "hide"]);
 function validateCompositeAttr(attrName: string, index: number): void {
     if (attrName.startsWith("@")) {
         throw new Error(
-            `[nix-js] Partial attribute interpolation is not supported on event bindings: "${attrName}" (binding index ${index}). ` +
+            `[elur] Partial attribute interpolation is not supported on event bindings: "${attrName}" (binding index ${index}). ` +
             `Event handlers must be a single full interpolation: ${attrName}=\${"\${handler}"}`,
         );
     }
     if (DIRECTIVE_ATTRS.has(attrName.toLowerCase())) {
         throw new Error(
-            `[nix-js] Partial attribute interpolation is not supported on directive "${attrName}" (binding index ${index}). ` +
+            `[elur] Partial attribute interpolation is not supported on directive "${attrName}" (binding index ${index}). ` +
             `Directives must be a single full interpolation: ${attrName}=\${"\${value}"}`,
         );
     }
     if (BOOLEAN_ATTRS.has(attrName.toLowerCase())) {
         throw new Error(
-            `[nix-js] Partial attribute interpolation is not supported on boolean attribute "${attrName}" (binding index ${index}). ` +
+            `[elur] Partial attribute interpolation is not supported on boolean attribute "${attrName}" (binding index ${index}). ` +
             `Boolean attributes depend on presence, not on their value: ${attrName}=\${"\${condition}"}`,
         );
     }
@@ -136,7 +136,7 @@ function lexTemplate(strings: readonly string[]): LexResult {
         if (!r) return;
         if (atEnd && r.quote !== null && r.holes.length > 0) {
             throw new Error(
-                `[nix-js] Unclosed quoted attribute value for "${r.attrName}" (binding index ${r.holes[0]}). ` +
+                `[elur] Unclosed quoted attribute value for "${r.attrName}" (binding index ${r.holes[0]}). ` +
                 `Add the closing ${r.quote}: ${r.attrName}=${r.quote}...${r.quote}`,
             );
         }
@@ -190,14 +190,14 @@ function lexTemplate(strings: readonly string[]): LexResult {
             case "tag-open":
             case "tag-name":
                 throw new Error(
-                    `[nix-js] Interpolation inside a tag name (binding index ${hole}) is not supported. ` +
-                    "Dynamic tag names are not part of Nix templates.",
+                    `[elur] Interpolation inside a tag name (binding index ${hole}) is not supported. ` +
+                    "Dynamic tag names are not part of Elur templates.",
                 );
             case "tag-body":
             case "attr-name":
             case "attr-ws":
                 throw new Error(
-                    `[nix-js] Interpolation inside an attribute name or in the tag body (binding index ${hole}) is not supported. ` +
+                    `[elur] Interpolation inside an attribute name or in the tag body (binding index ${hole}) is not supported. ` +
                     "Attribute names must be static: class=\${value}",
                 );
             default:
@@ -475,7 +475,7 @@ function buildNormalizedStrings(
 
 /**
  * Finds `html\`...\`` tagged template expressions in `code` and rewrites
- * partial attribute interpolations into full bindings using `__nixCompose`.
+ * partial attribute interpolations into full bindings using `__elurCompose`.
  *
  * Returns the transformed code, or `null` if no changes were made.
  */
@@ -516,14 +516,14 @@ export function transformInterpolation(code: string, fileId: string): string | n
                 if (plan === "passthrough") {
                     newExpressions.push(quasi.expressions[h] as t.Expression);
                 } else if (h === plan.firstHole) {
-                    // Build __nixCompose(literal0, expr0, literal1, expr1, ...)
+                    // Build __elurCompose(literal0, expr0, literal1, expr1, ...)
                     const args: (t.Expression | t.StringLiteral)[] = [];
                     args.push(t.stringLiteral(plan.literals[0]));
                     for (let i = 0; i < plan.sourceIndices.length; i++) {
                         args.push(quasi.expressions[plan.sourceIndices[i]] as t.Expression);
                         args.push(t.stringLiteral(plan.literals[i + 1]));
                     }
-                    const callExpr = t.callExpression(t.identifier("__nixCompose"), args);
+                    const callExpr = t.callExpression(t.identifier("__elurCompose"), args);
                     newExpressions.push(callExpr);
                     needsComposeImport = true;
                 }
@@ -545,11 +545,11 @@ export function transformInterpolation(code: string, fileId: string): string | n
 
     if (!changed) return null;
 
-    // Inject __nixCompose import if needed
+    // Inject __elurCompose import if needed
     if (needsComposeImport) {
         const importDecl = t.importDeclaration(
-            [t.importSpecifier(t.identifier("__nixCompose"), t.identifier("__nixCompose"))],
-            t.stringLiteral("@deijose/vite-plugin-nix-js/runtime")
+            [t.importSpecifier(t.identifier("__elurCompose"), t.identifier("__elurCompose"))],
+            t.stringLiteral("@elurjs/vite-plugin-elur/runtime")
         );
         ast.program.body.unshift(importDecl);
     }
