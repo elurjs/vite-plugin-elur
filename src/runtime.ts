@@ -94,7 +94,11 @@ export function getElurHmrRuntime(): ElurHmrRuntime {
   return window.__elurHmrRuntime;
 }
 
-const runtime = getElurHmrRuntime();
+let runtime: ElurHmrRuntime | null = null;                                                                                                                              
+  function getRuntime(): ElurHmrRuntime {                                                                                                                                                 
+      if (!runtime) runtime = getElurHmrRuntime();                                                                                                                        
+      return runtime;                                                                                                                                                     
+  }
 
 function mountInto(record: ElurMountRecord): void {
   const result = record.factory();
@@ -113,7 +117,7 @@ export function __elurMount(
   container: Element | string,
   options?: Record<string, unknown>
 ): void {
-  const existing = runtime.mounts.get(id);
+  const existing = getRuntime().mounts.get(id);
 
   if (existing) {
     existing.factory = factory;
@@ -130,39 +134,39 @@ export function __elurMount(
     container,
     options,
   };
-  runtime.mounts.set(id, record);
+  getRuntime().mounts.set(id, record);
   mountInto(record);
 }
 
 export function __elurGetOrCreateSignal<T>(id: string, factory: () => T): T {
-  const existing = runtime.signals.get(id);
+  const existing = getRuntime().signals.get(id);
   if (existing) return existing.signal as T;
   const signal = factory();
-  runtime.signals.set(id, { id, signal });
+  getRuntime().signals.set(id, { id, signal });
   return signal;
 }
 
 export function __elurGetOrCreateForm<T>(id: string, factory: () => T): T {
-  const existing = runtime.forms.get(id);
+  const existing = getRuntime().forms.get(id);
   if (existing) return existing.form as T;
   const form = factory();
-  runtime.forms.set(id, { id, form });
+  getRuntime().forms.set(id, { id, form });
   return form;
 }
 
 export function __elurGetOrCreateStore<T>(id: string, factory: () => T): T {
-  const existing = runtime.stores.get(id);
+  const existing = getRuntime().stores.get(id);
   if (existing) return existing.store as T;
   const store = factory();
-  runtime.stores.set(id, { id, store });
+  getRuntime().stores.set(id, { id, store });
   return store;
 }
 
 export function __elurGetOrCreateRouter<T>(id: string, factory: () => T): T {
-  const existing = runtime.routers.get(id);
+  const existing = getRuntime().routers.get(id);
   if (existing) return existing.router as T;
   const router = factory();
-  runtime.routers.set(id, { id, router });
+  getRuntime().routers.set(id, { id, router });
   return router;
 }
 
@@ -180,24 +184,24 @@ export function __elurSaveSnapshot(): {
     },
     focus: activeElement && activeElement.id ? `#${activeElement.id}` : null,
     router: null,
-    stores: Array.from(runtime.stores.entries()).map(([id, record]) => [id, record.store]),
+    stores: Array.from(getRuntime().stores.entries()).map(([id, record]) => [id, record.store]),
   };
 }
 
 export function __elurRestoreSnapshot(snapshot: ReturnType<typeof __elurSaveSnapshot>): void {
-  runtime.pendingScroll = snapshot.scroll;
-  runtime.pendingFocus = snapshot.focus;
+  getRuntime().pendingScroll = snapshot.scroll;
+  getRuntime().pendingFocus = snapshot.focus;
 
   // Schedule scroll/focus restoration after the next paint
   requestAnimationFrame(() => {
-    if (runtime.pendingScroll) {
-      window.scrollTo(runtime.pendingScroll.x, runtime.pendingScroll.y);
-      runtime.pendingScroll = null;
+    if (getRuntime().pendingScroll) {
+      window.scrollTo(getRuntime()?.pendingScroll?.x || 0, getRuntime()?.pendingScroll?.y || 0);
+      getRuntime().pendingScroll = null;
     }
-    if (runtime.pendingFocus) {
-      const el = document.querySelector(runtime.pendingFocus) as HTMLElement | null;
+    if (getRuntime().pendingFocus) {
+      const el = document.querySelector(getRuntime()?.pendingFocus || '') as HTMLElement | null;
       el?.focus();
-      runtime.pendingFocus = null;
+      getRuntime().pendingFocus = null;
     }
   });
 }
@@ -247,7 +251,7 @@ export function __elurHmrAccept(_newModule: unknown, moduleId: string): void {
   // to this module.
   const prefix = `${moduleId}#`;
   const records: ElurMountRecord[] = [];
-  for (const [id, record] of runtime.mounts) {
+  for (const [id, record] of getRuntime().mounts) {
     if (id === moduleId || id.startsWith(prefix)) records.push(record);
   }
   if (!records.length) return;

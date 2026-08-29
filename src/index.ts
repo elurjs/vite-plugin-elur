@@ -581,7 +581,8 @@ export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin 
 
       // Phase 3: HMR transform — preserve signals/stores/forms/routers/mounts.
       // Browser-only: the HMR runtime accesses window, skip in SSR.
-      if (!isSSR) {
+      const isBuild = this?.environment?.config?.command === "build";
+      if (!isSSR && !isBuild) {
         const hmrResult = hmrTransform(currentCode, fileId);
         if (hmrResult) {
           currentCode = hmrResult;
