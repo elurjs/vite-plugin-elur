@@ -2,6 +2,8 @@ import { parse } from "@babel/parser";
 import _generate from "@babel/generator";
 import * as t from "@babel/types";
 import _traverse, { type NodePath } from "@babel/traverse";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import type { Plugin } from "vite";
 import { transformInterpolation } from "./interpolation.js";
 import {
@@ -28,10 +30,17 @@ export interface ElurJsPluginOptions {
    */
   preserveDOM?: boolean;
   /**
-   * Inject Elur devtools client.
-   * @default false
+   * Inject the Elur DevTools client (`@elurjs/devtools-backend`) in dev mode.
+   * - `"auto"` (default): inject only during `vite serve` and only when
+   *   `@elurjs/devtools-backend` is installed. Ecosystem plugin entry points
+   *   (`@elurjs/query/devtools`, `@elurjs/i18n/devtools`, `@elurjs/auth/devtools`,
+   *   `@elurjs/ionic/devtools`) are injected too when resolvable.
+   * - `true`: always inject in dev; warns when the backend is not installed.
+   * - `false`: never inject.
+   * Never applies to production builds.
+   * @default "auto"
    */
-  devtools?: boolean;
+  devtools?: boolean | "auto";
   /**
    * Enable the build-time compiler for html`` templates.
    * When true, templates are compiled into direct DOM manipulation code
@@ -530,14 +539,86 @@ export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin 
   const opts = {
     preserveState: true,
     preserveDOM: true,
-    devtools: false,
+    devtools: "auto" as boolean | "auto",
     compiler: true,
     ...options,
   };
 
+  // --- DevTools injection (dev only) ---------------------------------------
+  // A virtual module imported from index.html via transformIndexHtml. It is
+  // injected with `head-prepend`, and module scripts execute in document
+  // order, so the backend installs before any app module runs.
+  const DEVTOOLS_VIRTUAL_ID = "virtual:elur-devtools";
+
+  const DEVTOOLS_CANDIDATES = [
+    "@elurjs/devtools-backend/auto",
+    "@elurjs/query/devtools",
+    "@elurjs/i18n/devtools",
+    "@elurjs/auth/devtools",
+    "@elurjs/ionic/devtools",
+  ];
+
+  let viteCommand: "serve" | "build" = "serve";
+  let devtoolsModules: string[] = [];
+
   return {
     name: "vite-plugin-elur",
     enforce: "pre",
+
+    configResolved(config) {
+      viteCommand = config.command;
+      if (opts.devtools === false || config.command !== "serve") return;
+
+      const req = createRequire(resolve(config.root, "package.json"));
+      const resolvable = DEVTOOLS_CANDIDATES.filter((specifier) => {
+        try {
+          req.resolve(specifier);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+
+      const backendFound = resolvable.includes(DEVTOOLS_CANDIDATES[0]!);
+      if (!backendFound) {
+        if (opts.devtools === true) {
+          this.warn(
+            "[vite-plugin-elur] `devtools: true` but @elurjs/devtools-backend is not installed. " +
+            "Install it to enable the browser extension integration."
+          );
+        }
+        devtoolsModules = [];
+        return;
+      }
+      devtoolsModules = resolvable;
+    },
+
+    resolveId(id) {
+      if (id === DEVTOOLS_VIRTUAL_ID) return DEVTOOLS_VIRTUAL_ID;
+      return null;
+    },
+
+    load(id) {
+      if (id !== DEVTOOLS_VIRTUAL_ID) return null;
+      return devtoolsModules.map((m) => `import ${JSON.stringify(m)};`).join("\n");
+    },
+
+    transformIndexHtml: {
+      order: "pre",
+      handler() {
+        if (viteCommand !== "serve" || devtoolsModules.length === 0) return [];
+        return [
+          {
+            tag: "script",
+            attrs: {
+              type: "module",
+              src: `/@id/${DEVTOOLS_VIRTUAL_ID}`,
+            },
+            injectTo: "head-prepend",
+          },
+        ];
+      },
+    },
 
     transform(code, id, transformOptions) {
       if (!id.endsWith(".ts") && !id.endsWith(".tsx") && !id.endsWith(".js") && !id.endsWith(".jsx")) {

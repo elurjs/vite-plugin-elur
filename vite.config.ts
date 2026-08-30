@@ -17,6 +17,7 @@ export default defineConfig({
         /^@elurjs\/core(\/.*)?$/,
         "@babel/core", "@babel/parser", "@babel/traverse", "@babel/generator", "@babel/types",
         "vite",
+        "node:module", "node:path",
       ],
     },
     sourcemap: true,

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## v2.1.0
+
+### Added
+
+- **DevTools injection (`devtools` option, now implemented)** — the previously
+  declared-but-unused `devtools` option now injects the Elur DevTools client
+  into `index.html` during `vite serve` via a virtual module
+  (`virtual:elur-devtools`, `head-prepend`, so the backend installs before any
+  app module runs):
+  - `"auto"` (new default): injects only in dev and only when
+    `@elurjs/devtools-backend` is installed. Ecosystem plugin entry points
+    (`@elurjs/query/devtools`, `@elurjs/i18n/devtools`, `@elurjs/auth/devtools`,
+    `@elurjs/ionic/devtools`) are injected as well when resolvable.
+  - `true`: always inject in dev; warns when the backend is not installed.
+  - `false`: never inject.
+  Never applies to production builds, so bundles are unaffected.
+
 ## v1.1.0
 
 ### Added
