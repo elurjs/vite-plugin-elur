@@ -489,7 +489,17 @@ export function transformInterpolation(code: string, fileId: string): string | n
     } catch {
         return null;
     }
+    if (!transformInterpolationAst(ast, fileId)) return null;
+    const result = generate(ast, { sourceMaps: true, sourceFileName: fileId });
+    return result.code;
+}
 
+/**
+ * C.10: la fase de interpolación sobre un AST ya parseado — muta el AST y
+ * devuelve si hubo cambios. El plugin la corre sobre el AST único del
+ * pipeline (un parse + un generate para las tres fases).
+ */
+export function transformInterpolationAst(ast: t.File, fileId: string): boolean {
     let changed = false;
     let needsComposeImport = false;
 
@@ -543,17 +553,17 @@ export function transformInterpolation(code: string, fileId: string): string | n
         },
     });
 
-    if (!changed) return null;
+    if (!changed) return false;
 
-    // Inject __elurCompose import if needed
+    // Inject __elurCompose import if needed — C.17: el helper vive en
+    // runtime/compiler (sin HMR).
     if (needsComposeImport) {
         const importDecl = t.importDeclaration(
             [t.importSpecifier(t.identifier("__elurCompose"), t.identifier("__elurCompose"))],
-            t.stringLiteral("@elurjs/vite-plugin-elur/runtime")
+            t.stringLiteral("@elurjs/vite-plugin-elur/runtime/compiler")
         );
         ast.program.body.unshift(importDecl);
     }
 
-    const result = generate(ast, { sourceMaps: true, sourceFileName: fileId });
-    return result.code;
+    return true;
 }

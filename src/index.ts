@@ -5,11 +5,13 @@ import _traverse, { type NodePath } from "@babel/traverse";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
-import { transformInterpolation } from "./interpolation.js";
+import { transformInterpolationAst } from "./interpolation.js";
+import { ELUR_COMPILER_ABI, assertCompilerAbi } from "./runtime/abi.js";
 import {
   compileTemplate,
   genFactoryCode,
   genCallCode,
+  COMPILER_ABI_VERSION,
   type ExpressionKind,
 } from "@elurjs/core-compiler";
 
@@ -49,6 +51,18 @@ export interface ElurJsPluginOptions {
    * @default true
    */
   compiler?: boolean;
+  /**
+   * Emit the compiled hydration renderer for every template.
+   * Set to `true` in apps that hydrate SSR markup (Elur Kit does this) —
+   * the compiled hydrator activates bindings by position without a marker
+   * scan. When false, client bundles skip the hydration/SSR code entirely
+   * (roughly half the compiled-helpers runtime); `hydrate()` still works via
+   * the generic marker-based fallback.
+   * The SSR renderer (`descriptor.ssr`) is emitted automatically only in
+   * SSR builds and does not depend on this flag.
+   * @default false
+   */
+  hydration?: boolean;
 }
 
 const ELUR_IMPORTS = [
@@ -71,46 +85,43 @@ interface ImportedNames {
   mount: string | null;
 }
 
-function getImportedNames(code: string): ImportedNames {
+function getImportedNames(ast: t.File): ImportedNames {
   const names: ImportedNames = { signal: null, createForm: null, createStore: null, createRouter: null, mount: null };
 
-  let ast: t.File;
-  try {
-    ast = parse(code, {
-      sourceType: "module",
-      plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
-    });
-  } catch {
-    return names;
-  }
-
-  traverse(ast, {
-    ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
-      const source = nodePath.node.source.value;
-      if (!isElurImport(source)) return;
-
-      for (const specifier of nodePath.node.specifiers) {
-        if (t.isImportSpecifier(specifier) && t.isIdentifier(specifier.imported)) {
-          const importedName = specifier.imported.name;
-          const localName = specifier.local.name;
-          if (importedName === "signal") names.signal = localName;
-          if (importedName === "createForm") names.createForm = localName;
-          if (importedName === "createStore") names.createStore = localName;
-          if (importedName === "createRouter") names.createRouter = localName;
-          if (importedName === "mount") names.mount = localName;
-        }
+  // C.10: los imports viven en el top level — basta un loop sobre
+  // program.body, sin traverse.
+  for (const node of ast.program.body) {
+    if (!t.isImportDeclaration(node)) continue;
+    const source = node.source.value;
+    if (!isElurImport(source)) continue;
+    for (const specifier of node.specifiers) {
+      if (t.isImportSpecifier(specifier) && t.isIdentifier(specifier.imported)) {
+        const importedName = specifier.imported.name;
+        const localName = specifier.local.name;
+        if (importedName === "signal") names.signal = localName;
+        if (importedName === "createForm") names.createForm = localName;
+        if (importedName === "createStore") names.createStore = localName;
+        if (importedName === "createRouter") names.createRouter = localName;
+        if (importedName === "mount") names.mount = localName;
       }
-    },
-  });
+    }
+  }
 
   return names;
 }
 
-function makeRuntimeImport(needed: string[]): t.ImportDeclaration {
+// C.17 — subpaths del runtime dividido: el código compilado importa de
+// `runtime/compiler` (sin HMR en el bundle de prod) y el transform HMR de
+// `runtime/hmr`. `@elurjs/vite-plugin-elur/runtime` sigue existiendo como
+// barrel retrocompatible para código emitido por versiones antiguas.
+const RUNTIME_COMPILER = "@elurjs/vite-plugin-elur/runtime/compiler";
+const RUNTIME_HMR = "@elurjs/vite-plugin-elur/runtime/hmr";
+
+function makeRuntimeImport(needed: string[], from = RUNTIME_COMPILER): t.ImportDeclaration {
   const specifiers = needed.map((name) =>
     t.importSpecifier(t.identifier(name), t.identifier(name))
   );
-  return t.importDeclaration(specifiers, t.stringLiteral("@elurjs/vite-plugin-elur/runtime"));
+  return t.importDeclaration(specifiers, t.stringLiteral(from));
 }
 
 // Strip TypeScript-only wrappers so we can inspect the underlying expression.
@@ -124,21 +135,9 @@ function unwrapExpression(node: t.Node): t.Node {
   return node;
 }
 
-function hmrTransform(code: string, fileId: string): string | null {
-  const names = getImportedNames(code);
+function hmrTransformAst(ast: t.File, names: ImportedNames, fileId: string): boolean {
   const hasElur = names.signal || names.createForm || names.createStore || names.createRouter || names.mount;
-  if (!hasElur) return null;
-
-  let ast: t.File;
-  try {
-    ast = parse(code, {
-      sourceType: "module",
-      plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
-    });
-  } catch (err) {
-    console.warn(`[elur-plugin] Could not parse ${fileId}:`, err);
-    return null;
-  }
+  if (!hasElur) return false;
 
   const runtimeImports: string[] = [];
   let hasMount = false;
@@ -238,12 +237,12 @@ function hmrTransform(code: string, fileId: string): string | null {
     },
   });
 
-  if (!runtimeImports.length) return null;
+  if (!runtimeImports.length) return false;
 
-  // Check if there's already a runtime import (e.g. from compilerTransform)
+  // Check if there's already an hmr runtime import (e.g. from a previous pass)
   const existingRuntimeImport = ast.program.body.find(
     (n): n is t.ImportDeclaration =>
-      t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
+      t.isImportDeclaration(n) && n.source.value === RUNTIME_HMR
   );
 
   if (existingRuntimeImport) {
@@ -259,7 +258,7 @@ function hmrTransform(code: string, fileId: string): string | null {
       }
     }
   } else {
-    ast.program.body.unshift(makeRuntimeImport(runtimeImports));
+    ast.program.body.unshift(makeRuntimeImport(runtimeImports, RUNTIME_HMR));
   }
 
   if (hasMount) {
@@ -291,7 +290,7 @@ function hmrTransform(code: string, fileId: string): string | null {
     if (!runtimeImports.includes("__elurHmrAccept")) {
       const imp = ast.program.body.find(
         (n): n is t.ImportDeclaration =>
-          t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
+          t.isImportDeclaration(n) && n.source.value === RUNTIME_HMR
       );
       if (imp) {
         imp.specifiers.push(t.importSpecifier(t.identifier("__elurHmrAccept"), t.identifier("__elurHmrAccept")));
@@ -300,8 +299,7 @@ function hmrTransform(code: string, fileId: string): string | null {
     ast.program.body.push(acceptBlock);
   }
 
-  const result = generate(ast, { sourceMaps: true, sourceFileName: fileId });
-  return result.code;
+  return true;
 }
 
 // =============================================================================
@@ -340,8 +338,11 @@ function lowerCompiledExpression(
       const factoryName = render.body.callee.name;
       const params = render.params.map((parameter) => generate(parameter).code);
       const args = (render.body.arguments as t.Expression[]).map((argument) => generate(argument).code);
+      // 4º arg: itemFactory → instancia compilada por fila. Hace el objeto
+      // dual (KeyedList+protocol): SSR keyed con markers elur-ki: y
+      // hidratación adoptiva — mismo artefacto en los tres mundos (C.12).
       return {
-        code: `__elurCompiledRepeatDirect(()=>(${generate(items).code}),${generate(key).code},(parent,before,${params.join(",")})=>${factoryName}$mount(parent,before,${args.join(",")}))`,
+        code: `__elurCompiledRepeatDirect(()=>(${generate(items).code}),${generate(key).code},(parent,before,${params.join(",")})=>${factoryName}$mount(parent,before,${args.join(",")}),(${params.join(",")})=>${factoryName}(${args.join(",")}))`,
         runtimeImport: "__elurCompiledRepeatDirect",
       };
     }
@@ -353,7 +354,125 @@ function lowerCompiledExpression(
   return { code: generate(node).code };
 }
 
+/**
+ * C.8 tier T1 (C.6): `() => <path>.value` con path estable — Identifiers,
+ * `this` y member-access puros; sin llamadas (un CallExpression puede
+ * devolver señales distintas entre corridas → el binding T1 fijaría la
+ * primera — aliasing desconocido, C.7). TS-unwraps (`!`, `as`, parens) OK.
+ */
+function isStableSignalPath(node: t.Node): boolean {
+  if (t.isIdentifier(node) || t.isThisExpression(node)) return true;
+  if (
+    t.isMemberExpression(node) &&
+    !node.computed &&
+    t.isIdentifier(node.property) &&
+    node.property.name !== "value"
+  ) return isStableSignalPath(node.object);
+  if (
+    t.isTSNonNullExpression(node) ||
+    t.isTSAsExpression(node) ||
+    t.isTSTypeAssertion(node) ||
+    t.isParenthesizedExpression(node)
+  ) return isStableSignalPath(node.expression);
+  return false;
+}
+
+function signalReadObject(node: t.Expression): t.Expression | null {
+  if (
+    t.isArrowFunctionExpression(node) &&
+    t.isMemberExpression(node.body) &&
+    !node.body.computed &&
+    t.isIdentifier(node.body.property, { name: "value" }) &&
+    isStableSignalPath(node.body.object)
+  ) return node.body.object;
+  return null;
+}
+
+/**
+ * C.7 tier T2: nodos que pueden esconder lecturas de señal o mutar estado —
+ * si aparecen en la expresión, el set de deps no es probable → rechazo.
+ * (Un CallExpression puede leer señales internamente; una nested function
+ * declara reads que sólo corren si alguien la invoca.)
+ */
+const T2_REJECT = new Set([
+  "CallExpression",
+  "OptionalCallExpression",
+  "NewExpression",
+  "AssignmentExpression",
+  "UpdateExpression",
+  "SequenceExpression",
+  "AwaitExpression",
+  "YieldExpression",
+  "TaggedTemplateExpression",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+  "ClassExpression",
+]);
+
+/**
+ * Colecta los objetos de toda lectura `.value` del cuerpo de un arrow cuyo
+ * objeto es un path estable (isStableSignalPath — la cadena no trackea en
+ * runtime, sólo el `.value` final suscribe). Devuelve los dep-expressions
+ * deduplicados por código, o null si la expresión no es T2-segura.
+ *
+ * Superset seguro: `cond ? a.value : b.value` → {a, b} — wakeups extra
+ * pero el writer compara antes de tocar DOM.
+ */
+function collectSignalDeps(node: t.Expression): t.Expression[] | null {
+  if (!t.isArrowFunctionExpression(node)) return null;
+  const body = node.body;
+  if (body.type === "BlockStatement") return null;
+  const deps: t.Expression[] = [];
+  const seen = new Set<string>();
+  let rejected = false;
+
+  const visit = (n: t.Node | null | undefined): void => {
+    if (!n || rejected) return;
+    if (t.isMemberExpression(n) || t.isOptionalMemberExpression(n)) {
+      if (!n.computed && t.isIdentifier(n.property, { name: "value" })) {
+        if (isStableSignalPath(n.object)) {
+          const key = generate(n.object).code;
+          if (!seen.has(key)) {
+            seen.add(key);
+            deps.push(n.object);
+          }
+          // El objeto es un path estable: sus links internos son reads
+          // planos (nunca `.value`) — no hace falta descender.
+          return;
+        }
+        rejected = true;
+        return;
+      }
+      // Member no-.value: el object puede contener reads (`a[b.value]`)
+      // — descender a object y property.
+    }
+    if (T2_REJECT.has(n.type)) {
+      rejected = true;
+      return;
+    }
+    if (t.isUnaryExpression(n) && n.operator === "delete") {
+      rejected = true;
+      return;
+    }
+    const keys = t.VISITOR_KEYS[n.type] ?? [];
+    for (const key of keys) {
+      const child = (n as unknown as Record<string, unknown>)[key];
+      if (Array.isArray(child)) {
+        for (const c of child) visit(c as t.Node);
+      } else {
+        visit(child as t.Node);
+      }
+    }
+  };
+  visit(body);
+  if (rejected || deps.length === 0) return null;
+  return deps;
+}
+
 function classifyExpression(node: t.Expression): ExpressionKind {
+  if (signalReadObject(node)) return "signal";
+  if (t.isArrowFunctionExpression(node) && collectSignalDeps(node)) return "derived";
+  // Mismo shape pero path no estable (calls, computed, etc.) → getter normal.
   if (
     t.isArrowFunctionExpression(node) &&
     t.isMemberExpression(node.body) &&
@@ -371,20 +490,11 @@ function classifyExpression(node: t.Expression): ExpressionKind {
   return "generic";
 }
 
-function compilerTransform(code: string, fileId: string): string | null {
-  let ast: t.File;
-  try {
-    ast = parse(code, {
-      sourceType: "module",
-      plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
-    });
-  } catch {
-    return null;
-  }
-
+function compilerTransformAst(ast: t.File, fileId: string, emit?: { hydrate?: boolean; ssr?: boolean }): boolean {
   // Find the local name for the `html` import
   let htmlLocalName: string | null = null;
   let repeatLocalName: string | null = null;
+  const portalLocalNames = new Set<string>();
 
   traverse(ast, {
     ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
@@ -394,11 +504,14 @@ function compilerTransform(code: string, fileId: string): string | null {
         if (!t.isImportSpecifier(specifier) || !t.isIdentifier(specifier.imported)) continue;
         if (specifier.imported.name === "html") htmlLocalName = specifier.local.name;
         if (specifier.imported.name === "repeat") repeatLocalName = specifier.local.name;
+        if (specifier.imported.name === "portal" || specifier.imported.name === "portalOutlet") {
+          portalLocalNames.add(specifier.local.name);
+        }
       }
     },
   });
 
-  if (!htmlLocalName) return null;
+  if (!htmlLocalName) return false;
 
   // Collect all html`` tagged template expressions at module scope or inside functions
   const factories: Array<{
@@ -443,7 +556,7 @@ function compilerTransform(code: string, fileId: string): string | null {
     },
   });
 
-  if (factories.length === 0) return null;
+  if (factories.length === 0) return false;
 
   // Sort factories by AST position in DESCENDING order (innermost first).
   // This ensures that nested html`` expressions (e.g. inside repeat() calls
@@ -462,25 +575,106 @@ function compilerTransform(code: string, fileId: string): string | null {
   const specializedFactories = new Set<string>();
 
   for (const { id, strings, exprNodes, expressionKinds, path } of factories) {
+    // C.9: valores literales para constant folding — el compiler hornea el
+    // literal en optimizedHtml y omite el binding (el arg se conserva para
+    // paridad del descriptor SSR).
+    const staticValues = exprNodes.map((node, index) => {
+      if (expressionKinds[index] !== "static") return undefined;
+      const n = unwrapExpression(node);
+      if (t.isStringLiteral(n) || t.isNumericLiteral(n)) return n.value;
+      if (t.isBooleanLiteral(n)) return n.value;
+      if (t.isNullLiteral(n)) return null;
+      return undefined;
+    });
+    // C.12: hints de bloque — `repeat(…)` (each) y `portal(…)`/`portalOutlet(…)`
+    // (portal). Van al descriptor como metadata estructural serializable.
+    const blockKinds = exprNodes.map((node) => {
+      const inner = unwrapExpression(node);
+      const call = t.isArrowFunctionExpression(inner) && t.isExpression(inner.body)
+        ? inner.body
+        : inner;
+      if (
+        repeatLocalName &&
+        t.isCallExpression(call) &&
+        t.isIdentifier(call.callee, { name: repeatLocalName }) &&
+        call.arguments.length === 3
+      ) return "each" as const;
+      if (
+        t.isCallExpression(call) &&
+        t.isIdentifier(call.callee) &&
+        portalLocalNames.has(call.callee.name)
+      ) return "portal" as const;
+      return null;
+    });
     // Compile the template
-    const compiled = compileTemplate(strings, expressionKinds);
+    const compiled = compileTemplate(strings, expressionKinds, staticValues, {
+      blockKinds,
+      devId: `${fileId}:${id}`,
+    });
     if (compiled.specialized) specializedFactories.add(id);
 
     // Generate factory code string and parse it into an AST node
-    const generatedFactory = genFactoryCode(id, compiled);
+    const generatedFactory = genFactoryCode(id, compiled, emit);
     const factoryAst = parse(generatedFactory.code, {
       sourceType: "module",
       plugins: ["typescript"],
     });
     // genFactoryCode may produce multiple declarations (resolver + factory)
     for (const decl of factoryAst.program.body) {
+      // C.11: los nodos parseados de snippets llevan locs del snippet, no del
+      // módulo — si se conservan, el sourcemap apunta a líneas falsas.
+      t.removePropertiesDeep(decl);
       factoryDecls.push(decl as t.Statement);
     }
 
-    // Generate the call expression to replace html``
-    const loweredExpressions = exprNodes.map((node) =>
-      lowerCompiledExpression(node, repeatLocalName, specializedFactories)
+    // C.6 T1: bindings "signal" en contexto node/attr reciben la SEÑAL como
+    // arg (el objeto de `() => <path>.value`), no el getter. En otros
+    // contextos (ej. eventos) el arrow es un handler/valor — no se toca.
+    const t1Indices = new Set(
+      compiled.bindings
+        .filter(
+          (b) =>
+            b.expressionKind === "signal" &&
+            (b.context.type === "node" || b.context.type === "attr"),
+        )
+        .map((b) => b.index),
     );
+    // C.7 T2: bindings "derived" en node/attr reciben el pack
+    // `__elurDerive(dep1,…,getter)` — deps estáticas evaluadas por instancia.
+    const t2Indices = new Set(
+      compiled.bindings
+        .filter(
+          (b) =>
+            b.expressionKind === "derived" &&
+            (b.context.type === "node" || b.context.type === "attr"),
+        )
+        .map((b) => b.index),
+    );
+    const loweredExpressions = exprNodes.map((node, index) => {
+      const sigPath = t1Indices.has(index) ? signalReadObject(node) : null;
+      if (sigPath) return { code: generate(sigPath).code };
+      if (t2Indices.has(index)) {
+        const deps = collectSignalDeps(node);
+        if (deps) {
+          const get = generate(node).code;
+          // 1 dep → `__elurDerive1(dep, get)`: pack sin array — el caso
+          // común no paga rest+slice por instancia.
+          if (deps.length === 1) {
+            return {
+              code: `__elurDerive1(${generate(deps[0]).code},${get})`,
+              runtimeImport: "__elurDerive1",
+            };
+          }
+          const parts = deps.map((dep) => generate(dep).code);
+          parts.push(get);
+          return {
+            code: `__elurDerive(${parts.join(",")})`,
+            runtimeImport: "__elurDerive",
+          };
+        }
+      }
+      return lowerCompiledExpression(node, repeatLocalName, specializedFactories);
+    });
     const exprSourceStrings = loweredExpressions.map((expression) => expression.code);
     for (const expression of loweredExpressions) {
       if (expression.runtimeImport && !runtimeImports.includes(expression.runtimeImport)) {
@@ -493,11 +687,23 @@ function compilerTransform(code: string, fileId: string): string | null {
       plugins: ["typescript"],
     });
     const callExpr = (callAst.program.body[0] as t.ExpressionStatement).expression;
+    t.removePropertiesDeep(callExpr);
     path.replaceWith(callExpr);
 
     for (const runtimeImport of generatedFactory.runtimeImports) {
       if (!runtimeImports.includes(runtimeImport)) runtimeImports.push(runtimeImport);
     }
+  }
+
+  // C.17 — marca ABI: el módulo compilado declara la versión de runtime
+  // que necesita; `runtime/compiler` valida en carga (console.error fuerte).
+  if (factoryDecls.length > 0) {
+    if (!runtimeImports.includes("__elurAbi")) runtimeImports.push("__elurAbi");
+    factoryDecls.unshift(
+      t.expressionStatement(
+        t.callExpression(t.identifier("__elurAbi"), [t.numericLiteral(COMPILER_ABI_VERSION)])
+      )
+    );
   }
 
   // Insert factory declarations at the top of the module (after imports)
@@ -507,12 +713,12 @@ function compilerTransform(code: string, fileId: string): string | null {
   const insertIndex = firstNonImport === -1 ? ast.program.body.length : firstNonImport;
   ast.program.body.splice(insertIndex, 0, ...factoryDecls);
 
-  // Add runtime import for __elurCompiledTemplate
+  // Add runtime import for compiler helpers
   if (runtimeImports.length > 0) {
-    // Check if there's already a runtime import
+    // Check if there's already a compiler runtime import
     const existingRuntimeImport = ast.program.body.find(
       (n): n is t.ImportDeclaration =>
-        t.isImportDeclaration(n) && n.source.value === "@elurjs/vite-plugin-elur/runtime"
+        t.isImportDeclaration(n) && n.source.value === RUNTIME_COMPILER
     );
 
     if (existingRuntimeImport) {
@@ -527,12 +733,11 @@ function compilerTransform(code: string, fileId: string): string | null {
         }
       }
     } else {
-      ast.program.body.unshift(makeRuntimeImport(runtimeImports));
+      ast.program.body.unshift(makeRuntimeImport(runtimeImports, RUNTIME_COMPILER));
     }
   }
 
-  const result = generate(ast, { sourceMaps: true, sourceFileName: fileId });
-  return result.code;
+  return true;
 }
 
 export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin {
@@ -543,6 +748,12 @@ export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin 
     compiler: true,
     ...options,
   };
+
+  // C.17: el ABI que emite el compilador instalado debe ser exactamente el
+  // que soporta este runtime. Un par plugin↔compiler desalineado falla aquí,
+  // en el arranque de Vite — no con un console.error dentro del bundle del
+  // usuario.
+  assertCompilerAbi(COMPILER_ABI_VERSION, ELUR_COMPILER_ABI);
 
   // --- DevTools injection (dev only) ---------------------------------------
   // A virtual module imported from index.html via transformIndexHtml. It is
@@ -641,38 +852,48 @@ export default function elurJsPlugin(options: ElurJsPluginOptions = {}): Plugin 
       const cwd = process.cwd();
       const fileId = id.startsWith(cwd) ? id.slice(cwd.length + 1) : id;
 
-      // Phase 1: Interpolation transform — rewrite partial attribute
-      // interpolations in html`` templates into full bindings.
-      // Safe for SSR: it only rewrites syntax, no runtime impact.
-      let currentCode = code;
-      const interpResult = transformInterpolation(currentCode, fileId);
-      if (interpResult) {
-        currentCode = interpResult;
+      // C.10/C.11 — pipeline de una sola pasada: un parse del módulo, las
+      // tres fases mutan el mismo AST, un solo generate con sourcemap real.
+      // (Antes: 4 parses del módulo + 3 generates y `map: null`.)
+      let ast: t.File;
+      try {
+        ast = parse(code, {
+          sourceType: "module",
+          plugins: ["typescript", "jsx", "importMeta", "topLevelAwait"],
+          sourceFilename: fileId,
+        });
+      } catch (err) {
+        console.warn(`[elur-plugin] Could not parse ${fileId}:`, err);
+        return null;
       }
 
-      // Phase 2: Compiler transform — compile html`` templates into
-      // pre-computed factory calls (eliminates detectContext, buildHTML,
-      // and both TreeWalkers at runtime). Browser-only: skip in SSR.
-      if (opts.compiler && !isSSR) {
-        const compilerResult = compilerTransform(currentCode, fileId);
-        if (compilerResult) {
-          currentCode = compilerResult;
-        }
-      }
+      const names = getImportedNames(ast);
+      let changed = false;
 
-      // Phase 3: HMR transform — preserve signals/stores/forms/routers/mounts.
-      // Browser-only: the HMR runtime accesses window, skip in SSR.
+      // Phase 1: Interpolation — partial attr interpolations → full bindings.
+      if (transformInterpolationAst(ast, fileId)) changed = true;
+
+      // Phase 2: Compiler — html`` → factory calls. C.12: también en SSR —
+      // el módulo compilado es SSR-safe en carga y el mismo artefacto
+      // alimenta cliente, SSR e hidratación.
+      // `hydration: true` = app isomórfica (kit): emite hydrate + ssr en
+      // ambos bundles para que markers y hydrator compilado concuerden.
+      // Build SSR puro: solo ssr. CSR por defecto: ninguno.
+      const emitHydration = opts.hydration === true;
+      if (opts.compiler && compilerTransformAst(ast, fileId, { hydrate: emitHydration, ssr: isSSR || emitHydration })) changed = true;
+
+      // Phase 3: HMR — preserve signals/stores/forms/routers/mounts.
+      // Browser-only: the HMR runtime accesses window, skip in SSR/build.
       const isBuild = this?.environment?.config?.command === "build";
-      if (!isSSR && !isBuild) {
-        const hmrResult = hmrTransform(currentCode, fileId);
-        if (hmrResult) {
-          currentCode = hmrResult;
-        }
-      }
+      if (!isSSR && !isBuild && hmrTransformAst(ast, names, fileId)) changed = true;
 
-      if (currentCode === code) return null;
+      if (!changed) return null;
 
-      return { code: currentCode, map: null };
+      const result = generate(ast, {
+        sourceMaps: true,
+        sourceFileName: fileId,
+      });
+      return { code: result.code, map: result.map };
     },
   };
 }

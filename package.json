@@ -1,6 +1,6 @@
 {
   "name": "@elurjs/vite-plugin-elur",
-  "version": "2.1.0",
+  "version": "2.2.0-beta.0",
   "description": "Vite plugin for Elur with Hot Module Replacement and full state preservation (signals, stores, routers, forms)",
   "license": "MIT",
   "author": "Deiver Vasquez",
@@ -30,6 +30,16 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js",
       "require": "./dist/runtime.cjs"
+    },
+    "./runtime/compiler": {
+      "types": "./dist/runtime/compiler.d.ts",
+      "import": "./dist/runtime/compiler.js",
+      "require": "./dist/runtime/compiler.cjs"
+    },
+    "./runtime/hmr": {
+      "types": "./dist/runtime/hmr.d.ts",
+      "import": "./dist/runtime/hmr.js",
+      "require": "./dist/runtime/hmr.cjs"
     }
   },
   "main": "./dist/index.cjs",
@@ -54,10 +64,10 @@
     "@babel/parser": "^7.26.0",
     "@babel/traverse": "^7.26.0",
     "@babel/types": "^7.26.0",
-    "@elurjs/core-compiler": "^1.0.0"
+    "@elurjs/core-compiler": "^1.0.0 || ^1.1.0-beta.0"
   },
   "peerDependencies": {
-    "@elurjs/core": "^3.6.2",
+    "@elurjs/core": "^3.6.2 || ^3.7.0-beta.0",
     "vite": "^7.0.0 || ^8.0.0"
   },
   "devDependencies": {

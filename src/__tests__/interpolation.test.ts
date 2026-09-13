@@ -97,7 +97,7 @@ const b = html\`<span class="label $\{cls}">y</span>\`;
         const code = "const t = html`<div class=\"btn ${size}\">x</div>`;";
         const out = transform(code);
         expect(out).not.toBeNull();
-        expect(out!).toContain('import { __elurCompose } from "@elurjs/vite-plugin-elur/runtime"');
+        expect(out!).toContain('import { __elurCompose } from "@elurjs/vite-plugin-elur/runtime/compiler"');
     });
 
     it("does not inject import when no partials", () => {

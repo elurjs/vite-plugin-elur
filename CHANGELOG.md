@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## v2.2.0-beta.0
+
+Prerelease del canal beta — emite el artefacto compilado de Elur Next
+(descriptors con IR compartida cliente/SSR/hidratación). Requiere
+`@elurjs/core >= 3.6.2` (estable) o `3.7.0-beta.x`.
+
+### Added
+
+- **`descriptor.ssr` (C.12 fase 2)** — el codegen emite
+  `_f$ssr(emit, v0…vN)` con los strings pre-cortados en build; el core
+  lo despacha con `makeSsrEmit` (paridad byte a byte con el intérprete).
+- **`descriptor.blocks` + `descriptor.dev`** — el plugin clasifica
+  `repeat(...)` como `each` y `portal(...)`/`portalOutlet(...)` como
+  `portal`, y serializa un `dev.id` estable por template.
+- **Hidratación compilada (C.13)** — `descriptor.hydrate` activa
+  bindings por posición; SSR emite markers `elur-N`/`elur-ki:` sólo en
+  boundaries variables.
+- **Constant folding parcial (C.9)** — literales `string`/`number` se
+  hornean en `optimizedHtml` (`class=${"active"}` → `class="active"`)
+  con escape dedicado; conservador con directivas, urls y `table`-family.
+- **SVG/MathML + multi-root (C.14)** — namespaces ya especializan
+  (`className` readonly en SVG → `setAttribute`; `xlink:`/`xml:` →
+  `setAttributeNS`); multi-root emite factory de fragmento con bounds
+  `elur-fs`/`elur-fe` y dismount por rango único.
+- **`childNodes[i]` O(1) (C.15)** — paths DOM emitidos indexados en vez
+  de cadenas `nextSibling` cuadráticas.
+- **Sourcemaps reales (C.11)** + **pipeline de una pasada (C.10)** —
+  un parse, mutaciones sobre el mismo AST, un solo `generate` con
+  `sourceMaps: true`.
+- **ABI versionado (C.17)** — `COMPILER_ABI_VERSION` ↔
+  `ELUR_COMPILER_ABI` en runtime; split `runtime/compiler|hmr|abi`.
+- **Fast paths de reconcile (C.16.2)** — prefix/suffix/ventanas
+  contiguas en `__elurCompiledRepeat`/`Direct`; sibling-walk en vez de
+  `Range.deleteContents` (patológico en happy-dom).
+
+### Fixed
+
+- `__elurCompose`/`__elurAttr` desenvuelven signals (antes `[object Object]`).
+- Reconcile compilado difiere `onMount` hasta el commit vía
+  `_postMountScope`.
+
 ## v2.1.0
 
 ### Added

@@ -7,6 +7,11 @@ export default defineConfig({
       entry: {
         index: resolve("src/index.ts"),
         runtime: resolve("src/runtime.ts"),
+        // C.17 — runtime dividido: el código generado importa
+        // `runtime/compiler` (sin HMR en prod); el transform HMR usa
+        // `runtime/hmr`. `runtime` queda como barrel retrocompatible.
+        "runtime/compiler": resolve("src/runtime/compiler.ts"),
+        "runtime/hmr": resolve("src/runtime/hmr.ts"),
       },
       formats: ["es", "cjs"],
       fileName: (format, entryName) =>
