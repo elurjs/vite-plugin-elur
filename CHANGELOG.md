@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v2.2.0
+
+Promoción a estable del canal beta `2.2.0-beta.x` — emite el artefacto
+compilado de Elur Next (descriptors con IR compartida
+cliente/SSR/hidratación). Compatible con `@elurjs/core` `^3.6.2`,
+`3.7.0-beta.x` y `^4.0.0` (motor next-2 por defecto).
+
 ## v2.2.0-beta.0
 
 Prerelease del canal beta — emite el artefacto compilado de Elur Next

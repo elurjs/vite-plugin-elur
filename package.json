@@ -1,6 +1,6 @@
 {
   "name": "@elurjs/vite-plugin-elur",
-  "version": "2.2.0-beta.0",
+  "version": "2.2.0",
   "description": "Vite plugin for Elur with Hot Module Replacement and full state preservation (signals, stores, routers, forms)",
   "license": "MIT",
   "author": "Deiver Vasquez",
@@ -67,7 +67,7 @@
     "@elurjs/core-compiler": "^1.0.0 || ^1.1.0-beta.0"
   },
   "peerDependencies": {
-    "@elurjs/core": "^3.6.2 || ^3.7.0-beta.0",
+    "@elurjs/core": "^3.6.2 || ^3.7.0-beta.0 || ^4.0.0",
     "vite": "^7.0.0 || ^8.0.0"
   },
   "devDependencies": {
